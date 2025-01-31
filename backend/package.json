@@ -1,0 +1,34 @@
+{
+    "name": "backend",
+    "version": "1.0.0",
+    "main": "index.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "dev": "ts-node-dev src/server.ts",
+        "setup-db": "ts-node scripts/setup-db.ts",
+        "migrate": "ts-node scripts/migrate.ts",
+        "init-db": "npm run setup-db && npm run migrate"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "description": "",
+    "dependencies": {
+        "@fastify/cors": "^10.0.2",
+        "@fastify/jwt": "^9.0.3",
+        "argon2": "^0.41.1",
+        "bcrypt": "^5.1.1",
+        "dotenv": "^16.4.7",
+        "fastify": "^5.2.1",
+        "openpgp": "^6.0.1",
+        "pg": "^8.13.1",
+        "zod": "^3.24.1"
+    },
+    "devDependencies": {
+        "@types/bcrypt": "^5.0.2",
+        "@types/node": "^22.12.0",
+        "@types/pg": "^8.11.11",
+        "ts-node-dev": "^2.0.0",
+        "typescript": "^5.7.3"
+    }
+}
