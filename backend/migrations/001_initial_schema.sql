@@ -53,6 +53,20 @@ CREATE TABLE user_sso_connections (
     UNIQUE(provider_id, external_user_id)
 );
 
+-- Create roles table
+CREATE TABLE roles (
+  id SERIAL PRIMARY KEY,
+  name VARCHAR(50) UNIQUE NOT NULL,
+  description TEXT
+);
+
+-- Create user_roles table
+CREATE TABLE user_roles (
+  user_id INT REFERENCES users(id),
+  role_id INT REFERENCES roles(id),
+  PRIMARY KEY (user_id, role_id)
+);
+
 -- Create indexes for better performance
 CREATE INDEX idx_auth_methods_user_id ON auth_methods(user_id);
 CREATE INDEX idx_user_sso_connections_user_id ON user_sso_connections(user_id);

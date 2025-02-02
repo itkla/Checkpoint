@@ -9,6 +9,18 @@ declare module 'fastify' {
     interface FastifyInstance {
         jwt: JWT;
     }
+    interface PassportUser {
+        id: string | number;
+    }
+}
+
+declare module '@fastify/passport' {
+    interface PassportUser {
+        id: string | number;
+    }
+    interface AuthenticatedRequest {
+        user: PassportUser;
+    }
 }
 // import bcrypt from 'bcrypt';
 import * as argon2 from 'argon2';
@@ -17,6 +29,31 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import * as openpgp from 'openpgp';
+import { createClient } from 'redis';
+
+const redis = createClient();
+redis.connect().catch(console.error);
+
+import type {
+    GenerateRegistrationOptionsOpts,
+    VerifyRegistrationResponseOpts,
+    GenerateAuthenticationOptionsOpts,
+    VerifyAuthenticationResponseOpts,
+} from '@simplewebauthn/server';
+import {
+    generateRegistrationOptions,
+    generateAuthenticationOptions,
+    verifyRegistrationResponse,
+    verifyAuthenticationResponse,
+} from '@simplewebauthn/server';
+import type {
+    RegistrationResponseJSON,
+    AuthenticationResponseJSON,
+} from '@simplewebauthn/types';
+
+import passport, { PassportUser } from '@fastify/passport';
+import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
+import { Strategy as LineStrategy } from 'passport-line';
 
 dotenv.config();
 
@@ -30,6 +67,10 @@ const pool = new Pool({
 
 const server = fastify();
 
+const rpName = 'Checkpoint';
+const rpID = process.env.DOMAIN || 'localhost';
+const origin = process.env.FRONTEND_URL || `https://${rpID}`;
+
 // Register plugins
 server.register(cors, {
     origin: process.env.FRONTEND_URL,
@@ -40,6 +81,88 @@ server.register(jwt, {
     secret: process.env.JWT_SECRET!
 });
 
+server.register(passport.initialize());
+server.register(passport.secureSession());
+
+// Configure SSO providers
+passport.use(new GoogleStrategy({
+    clientID: process.env.GOOGLE_CLIENT_ID!,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    callbackURL: `${process.env.BACKEND_URL}/auth/google/callback`
+},
+    async (accessToken, refreshToken, profile, done) => {
+        try {
+            const email = profile.emails?.[0].value;
+            if (!email) throw new Error('No email provided');
+
+            const result = await pool.query(
+                'SELECT * FROM users WHERE email = $1',
+                [email]
+            );
+
+            let user = result.rows[0];
+
+            if (!user) {
+                // Create new user if doesn't exist
+                const newUser = await pool.query(
+                    'INSERT INTO users (email) VALUES ($1) RETURNING *',
+                    [email]
+                );
+                user = newUser.rows[0];
+
+                // Add SSO as auth method
+                await pool.query(
+                    'INSERT INTO auth_methods (user_id, type, is_preferred, metadata) VALUES ($1, $2, $3, $4)',
+                    [user.id, 'sso', true, { provider: 'google', profile_id: profile.id }]
+                );
+            }
+
+            done(null, user);
+        } catch (err) {
+            done(err as Error, undefined);
+        }
+    }
+));
+
+passport.use(new LineStrategy({
+    channelID: process.env.LINE_CHANNEL_ID!,
+    channelSecret: process.env.LINE_CHANNEL_SECRET!,
+    callbackURL: `${process.env.BACKEND_URL}/auth/line/callback`
+},
+    async (accessToken, refreshToken, profile, done) => {
+        try {
+            const email = profile.emails?.[0].value;
+            if (!email) throw new Error('No email provided');
+
+            const result = await pool.query(
+                'SELECT * FROM users WHERE email = $1',
+                [email]
+            );
+
+            let user = result.rows[0];
+
+            if (!user) {
+                // Create new user if doesn't exist
+                const newUser = await pool.query(
+                    'INSERT INTO users (email) VALUES ($1) RETURNING *',
+                    [email]
+                );
+                user = newUser.rows[0];
+
+                // Add SSO as auth method
+                await pool.query(
+                    'INSERT INTO auth_methods (user_id, type, is_preferred, metadata) VALUES ($1, $2, $3, $4)',
+                    [user.id, 'sso', true, { provider: 'line', profile_id: profile.id }]
+                );
+            }
+
+            done(null, user);
+        } catch (err) {
+            done(err as Error, undefined);
+        }
+    }
+));
+
 // Schema definitions
 const UserSchema = z.object({
     email: z.string().email(),
@@ -48,6 +171,11 @@ const UserSchema = z.object({
     last_name: z.string().optional(),
     public_key: z.string().optional(),
     private_key: z.string().optional(),
+});
+
+const LoginSchema = z.object({
+    email: z.string().email(),
+    password: z.string().min(8),
 });
 
 // Initialize database
@@ -103,6 +231,36 @@ async function initDB() {
     }
 }
 
+/*
+
+FUNCTIONS
+
+*/
+
+async function requireRole(roleName: string, request: any, reply: any) {
+    const { userId } = request.user; // assuming JWT payload contains userId
+    const result = await pool.query(
+        `SELECT r.name 
+    FROM roles r 
+    JOIN user_roles ur ON r.id = ur.role_id 
+    WHERE ur.user_id = $1 AND r.name = $2`,
+        [userId, roleName]
+    );
+    if (result.rowCount === 0) {
+        reply.code(403).send({ error: 'Forbidden' });
+        return false;
+    }
+    return true;
+}
+
+// Define an audit log helper function
+async function auditLog(event: string, details: Record<string, any>) {
+    await pool.query(
+        'INSERT INTO audit_logs (event, details) VALUES ($1, $2)',
+        [event, details]
+    );
+}
+
 // Routes
 server.post('/api/register', async (request, reply) => {
     const body = UserSchema.parse(request.body);
@@ -122,7 +280,7 @@ server.post('/api/register', async (request, reply) => {
             [body.email, body.first_name, body.last_name, publicKey, privateKey]
         );
 
-        if(body.password) {
+        if (body.password) {
             // hash the password using argon2
             const hashedPassword = await argon2.hash(body.password);
             // use auth_methods table to store hashed password if set
@@ -143,19 +301,126 @@ server.post('/api/register', async (request, reply) => {
     }
 });
 
-server.post('/api/login', async (request, reply) => {
-    const body = UserSchema.parse(request.body);
+server.post<{ Body: { email: string } }>('/api/auth/passkey/login/start', async (request, reply) => {
+    const { email } = request.body;
 
-    const result = await pool.query('SELECT * FROM users WHERE email = $1', [body.email]);
-    const user = result.rows[0];
+    // Ensure the user exists
+    const userResult = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (userResult.rowCount === 0) {
+        reply.code(400).send({ error: 'User does not exist.' });
+        return;
+    }
+    const user = userResult.rows[0];
 
-    if (!user || !(await argon2.verify(user.password, body.password))) {
-        reply.code(401);
-        return { error: 'Invalid credentials' };
+    // Retrieve stored passkey credentials (assumed to be stored in auth_methods)
+    const credentialsResult = await pool.query(
+        'SELECT metadata FROM auth_methods WHERE user_id = $1 AND type = $2',
+        [user.id, 'passkey']
+    );
+    const allowedCredentials = credentialsResult.rows.map((row) => {
+        const metadata = row.metadata;
+        return {
+            id: metadata.credentialID,
+            type: 'public-key',
+        };
+    });
+
+    // Generate authentication options for passkey login
+    const options = generateAuthenticationOptions({
+        rpID,
+        allowCredentials: allowedCredentials,
+        userVerification: 'preferred',
+    });
+
+    // Store the challenge in Redis for later verification
+    await redis.set(`authentication_${user.id}`, JSON.stringify(options), { EX: 300 });
+    reply.send(options);
+});
+
+
+server.post<{ Body: { email: string, response: any } }>('/api/auth/passkey/login/complete', async (request, reply) => {
+    const { email, response } = request.body;
+
+    // Ensure the user exists
+    const userResult = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    if (userResult.rowCount === 0) {
+        reply.code(400).send({ error: 'User does not exist.' });
+        return;
+    }
+    const user = userResult.rows[0];
+
+    // Retrieve the expected challenge from Redis
+    const expectedChallenge = await redis.get(`authentication_${user.id}`);
+    if (!expectedChallenge) {
+        reply.code(400).send({ error: 'Authentication session expired' });
+        return;
     }
 
+    try {
+        // Get the credential info from auth_methods
+        const credentialResult = await pool.query(
+            'SELECT metadata FROM auth_methods WHERE user_id = $1 AND type = $2 AND metadata->>\'credentialID\' = $3',
+            [user.id, 'passkey', response.id]
+        );
+        if (credentialResult.rowCount === 0) {
+            reply.code(400).send({ error: 'Invalid credential' });
+            return;
+        }
+
+        // Verify the authentication response using @simplewebauthn/server
+        const verification = await verifyAuthenticationResponse({
+            response: response as AuthenticationResponseJSON,
+            expectedChallenge,
+            expectedOrigin: origin,
+            expectedRPID: rpID,
+            authenticatorInfo: {
+                credentialID: Buffer.from(credentialResult.rows[0].metadata.credentialID),
+                credentialPublicKey: Buffer.from(credentialResult.rows[0].metadata.credentialPublicKey),
+                counter: credentialResult.rows[0].metadata.counter
+            }
+        });
+
+        if (verification.verified) {
+            // Issue a JWT on successful passkey authentication
+            const token = server.jwt.sign({ userId: user.id });
+            reply.send({ token });
+        } else {
+            reply.code(400).send({ error: 'Authentication failed' });
+        }
+    } catch (err) {
+        reply.code(400).send({ error: 'Invalid authentication response' });
+    }
+});
+
+
+server.post('/api/login', async (request, reply) => {
+    const { email, password } = LoginSchema.parse(request.body);
+
+    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+    const user = result.rows[0];
+
+    if (!user) {
+        reply.code(401).send({ error: 'Invalid credentials' });
+        return;
+    }
+
+    const authResult = await pool.query(
+        'SELECT hashed_password FROM auth_methods WHERE user_id = $1 AND type = $2',
+        [user.id, 'password']
+    );
+    const authMethod = authResult.rows[0];
+
+    if (!authMethod || !(await argon2.verify(authMethod.hashed_password, password))) {
+        reply.code(401).send({ error: 'Invalid credentials' });
+        return;
+    }
+
+    // Sign and return a JWT token
     const token = server.jwt.sign({ userId: user.id });
-    return { user: { id: user.id, email: user.email, name: user.name }, token };
+    reply.send({ user: { id: user.id, email: user.email }, token });
+
+    // const token = server.jwt.sign({ userId: user.id });
+    // return { user: { id: user.id, email: user.email, name: user.name }, token };
 });
 
 // Protected route example
@@ -166,6 +431,61 @@ server.post('/api/login', async (request, reply) => {
 //     const result = await pool.query('SELECT id, email, name FROM users WHERE id = $1', [userId]);
 //     return result.rows[0];
 // });
+
+
+// SSO routes
+server.get('/auth/google', passport.authenticate('google', {
+    scope: ['profile', 'email']
+}));
+
+server.get('/auth/google/callback',
+    passport.authenticate('google', { session: false }),
+    async (request, reply) => {
+        const token = server.jwt.sign({ userId: (request.user as PassportUser).id });
+        // Redirect to frontend with token
+        reply.redirect(`${process.env.FRONTEND_URL}/auth/callback?token=${token}`);
+    }
+);
+
+server.get('/auth/line',
+    passport.authenticate('line', {
+        scope: ['profile', 'openid', 'email']
+    })
+);
+
+server.get('/auth/line/callback',
+    passport.authenticate('line', { session: false }),
+    async (request, reply) => {
+        const token = server.jwt.sign({ userId: (request.user as PassportUser).id });
+        // Redirect to frontend with token
+        reply.redirect(`${process.env.FRONTEND_URL}/auth/callback?token=${token}`);
+    }
+);
+
+server.get('/api/users/:fnc', async (request, reply) => {
+    // Destructure the "fnc" parameter from the request
+    const { fnc } = request.params as { fnc: string };
+
+    // (Token verification comes next – see snippet 4)
+    // ...
+    if (fnc === 'all') {
+        const result = await pool.query('SELECT * FROM users');
+        reply.send(result.rows);
+    } else if (fnc !== "") {
+        const result = await pool.query('SELECT * FROM users WHERE id = $1', [fnc]);
+        reply.send(result.rows);
+    } else {
+        reply.send({ error: 'Invalid function' });
+    }
+});
+
+server.post('/api/users/:userId/assign-role', async (request, reply) => {
+    const { userId } = request.params as { userId: string };
+    const { roleId } = request.body as { roleId: number };
+
+    await pool.query('INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [userId, roleId]);
+    reply.send({ success: true });
+});
 
 // Start server
 async function start() {
@@ -178,27 +498,5 @@ async function start() {
         process.exit(1);
     }
 }
-
-server.get('/api/users/:fnc', async (request, reply) => {
-    const fnc = request.params;
-    try {
-        if(request.headers.authorization) {
-            const token = request.headers.authorization.split(' ')[1];
-            const decoded = server.jwt.decode<{ userId: number }>(token);
-            if(decoded) {
-                switch (fnc) {
-                    case 'all':
-                        const result = await pool.query('SELECT * FROM users');
-                        return result.rows;
-                    default:
-                        return { error: 'Invalid function' };
-                }
-            }
-        }
-    } catch (err) {
-        console.error(err);
-        return { error: 'Invalid token' };
-    }
-});
 
 start();
