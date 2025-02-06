@@ -3,25 +3,6 @@ import fastify from 'fastify';
 import cors from '@fastify/cors';
 import jwt, { JWT } from '@fastify/jwt';
 import { Pool } from 'pg';
-
-// Extend FastifyInstance type to include JWT
-declare module 'fastify' {
-    interface FastifyInstance {
-        jwt: JWT;
-    }
-    interface PassportUser {
-        id: string | number;
-    }
-}
-
-declare module '@fastify/passport' {
-    interface PassportUser {
-        id: string | number;
-    }
-    interface AuthenticatedRequest {
-        user: PassportUser;
-    }
-}
 // import bcrypt from 'bcrypt';
 import * as argon2 from 'argon2';
 import { z } from 'zod';
@@ -31,8 +12,16 @@ import path from 'path';
 import * as openpgp from 'openpgp';
 import { createClient } from 'redis';
 
-const redis = createClient();
-redis.connect().catch(console.error);
+const redis = createClient({
+    // url: `redis://:${process.env.REDIS_PASSWORD}@${process.env.REDIS_HOST}:${process.env.REDIS_PORT}`,
+});
+try {
+    redis.connect().catch(console.error);
+    console.log('Connected to Redis');
+} catch (err) {
+    console.error("An error occurred connecting to Redis: " + err);
+}
+
 
 import type {
     GenerateRegistrationOptionsOpts,
@@ -51,9 +40,41 @@ import type {
     AuthenticationResponseJSON,
 } from '@simplewebauthn/types';
 
-import passport, { PassportUser } from '@fastify/passport';
+import passport from '@fastify/passport';
+import fastifySecureSession from '@fastify/secure-session';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { Strategy as LineStrategy } from 'passport-line';
+
+// Extend FastifyInstance type to include JWT
+declare module 'fastify' {
+    interface FastifyRequest {
+        jwtUser: {
+            userId: string | number;
+        };
+    }
+    interface FastifyInstance {
+        jwt: JWT;
+    }
+}
+
+declare module '@fastify/passport' {
+    interface PassportUser {
+        id: string | number;
+    }
+    // interface AuthenticatedRequest {
+    //     passportUser: PassportUser;
+    // }
+}
+
+declare module '@fastify/jwt' {
+    interface FastifyJWT {
+        user: {
+            id: string | number;
+            email?: string;
+        }
+    }
+}
+
 
 dotenv.config();
 
@@ -65,7 +86,7 @@ const pool = new Pool({
     database: process.env.DB_NAME,
 });
 
-const server = fastify();
+const server = fastify({ logger: true });
 
 const rpName = 'Checkpoint';
 const rpID = process.env.DOMAIN || 'localhost';
@@ -77,91 +98,103 @@ server.register(cors, {
     credentials: true
 });
 
-server.register(jwt, {
-    secret: process.env.JWT_SECRET!
+server.register(fastifySecureSession, {
+    key: process.env.SESSION_KEY || '85P5B+/sXn6zwnXP6O8/u6abFWb8M5aOXfrpJruhm1M=',
+    cookie: {
+        secure: process.env.NODE_ENV === 'production'
+    }
 });
-
 server.register(passport.initialize());
+server.register(jwt, {
+    secret: process.env.JWT_SECRET!,
+    // decorateRequest: true,
+    namespace: 'jwtUser'
+});
 server.register(passport.secureSession());
 
+
 // Configure SSO providers
-passport.use(new GoogleStrategy({
-    clientID: process.env.GOOGLE_CLIENT_ID!,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    callbackURL: `${process.env.BACKEND_URL}/auth/google/callback`
-},
-    async (accessToken, refreshToken, profile, done) => {
-        try {
-            const email = profile.emails?.[0].value;
-            if (!email) throw new Error('No email provided');
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+    passport.use(new GoogleStrategy({
+        clientID: process.env.GOOGLE_CLIENT_ID!,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+        callbackURL: `${process.env.BACKEND_URL}/auth/google/callback`
+    },
+        async (accessToken, refreshToken, profile, done) => {
+            try {
+                const email = profile.emails?.[0].value;
+                if (!email) throw new Error('No email provided');
 
-            const result = await pool.query(
-                'SELECT * FROM users WHERE email = $1',
-                [email]
-            );
-
-            let user = result.rows[0];
-
-            if (!user) {
-                // Create new user if doesn't exist
-                const newUser = await pool.query(
-                    'INSERT INTO users (email) VALUES ($1) RETURNING *',
+                const result = await pool.query(
+                    'SELECT * FROM users WHERE email = $1',
                     [email]
                 );
-                user = newUser.rows[0];
 
-                // Add SSO as auth method
-                await pool.query(
-                    'INSERT INTO auth_methods (user_id, type, is_preferred, metadata) VALUES ($1, $2, $3, $4)',
-                    [user.id, 'sso', true, { provider: 'google', profile_id: profile.id }]
-                );
+                let user = result.rows[0];
+
+                if (!user) {
+                    // Create new user if doesn't exist
+                    const newUser = await pool.query(
+                        'INSERT INTO users (email) VALUES ($1) RETURNING *',
+                        [email]
+                    );
+                    user = newUser.rows[0];
+
+                    // Add SSO as auth method
+                    await pool.query(
+                        'INSERT INTO auth_methods (user_id, type, is_preferred, metadata) VALUES ($1, $2, $3, $4)',
+                        [user.id, 'sso', true, { provider: 'google', profile_id: profile.id }]
+                    );
+                }
+
+                done(null, user);
+            } catch (err) {
+                done(err as Error, undefined);
             }
-
-            done(null, user);
-        } catch (err) {
-            done(err as Error, undefined);
         }
-    }
-));
+    ))
+};
 
-passport.use(new LineStrategy({
-    channelID: process.env.LINE_CHANNEL_ID!,
-    channelSecret: process.env.LINE_CHANNEL_SECRET!,
-    callbackURL: `${process.env.BACKEND_URL}/auth/line/callback`
-},
-    async (accessToken, refreshToken, profile, done) => {
-        try {
-            const email = profile.emails?.[0].value;
-            if (!email) throw new Error('No email provided');
+if (process.env.LINE_CHANNEL_ID && process.env.LINE_CHANNEL_SECRET) {
+    passport.use(new LineStrategy({
+        channelID: process.env.LINE_CHANNEL_ID!,
+        channelSecret: process.env.LINE_CHANNEL_SECRET!,
+        callbackURL: `${process.env.BACKEND_URL}/auth/line/callback`
+    },
+        async (accessToken, refreshToken, profile, done) => {
+            try {
+                const email = profile.emails?.[0].value;
+                if (!email) throw new Error('No email provided');
 
-            const result = await pool.query(
-                'SELECT * FROM users WHERE email = $1',
-                [email]
-            );
-
-            let user = result.rows[0];
-
-            if (!user) {
-                // Create new user if doesn't exist
-                const newUser = await pool.query(
-                    'INSERT INTO users (email) VALUES ($1) RETURNING *',
+                const result = await pool.query(
+                    'SELECT * FROM users WHERE email = $1',
                     [email]
                 );
-                user = newUser.rows[0];
 
-                // Add SSO as auth method
-                await pool.query(
-                    'INSERT INTO auth_methods (user_id, type, is_preferred, metadata) VALUES ($1, $2, $3, $4)',
-                    [user.id, 'sso', true, { provider: 'line', profile_id: profile.id }]
-                );
+                let user = result.rows[0];
+
+                if (!user) {
+                    // Create new user if doesn't exist
+                    const newUser = await pool.query(
+                        'INSERT INTO users (email) VALUES ($1) RETURNING *',
+                        [email]
+                    );
+                    user = newUser.rows[0];
+
+                    // Add SSO as auth method
+                    await pool.query(
+                        'INSERT INTO auth_methods (user_id, type, is_preferred, metadata) VALUES ($1, $2, $3, $4)',
+                        [user.id, 'sso', true, { provider: 'line', profile_id: profile.id }]
+                    );
+                }
+
+                done(null, user);
+            } catch (err) {
+                done(err as Error, undefined);
             }
-
-            done(null, user);
-        } catch (err) {
-            done(err as Error, undefined);
         }
-    }
-));
+    ));
+};
 
 // Schema definitions
 const UserSchema = z.object({
@@ -254,15 +287,21 @@ async function requireRole(roleName: string, request: any, reply: any) {
 }
 
 // Define an audit log helper function
-async function auditLog(event: string, details: Record<string, any>) {
+async function auditLog(user_id: string, event: string, details: Record<string, any>) {
     await pool.query(
         'INSERT INTO audit_logs (event, details) VALUES ($1, $2)',
-        [event, details]
     );
 }
 
 // Routes
-server.post('/api/register', async (request, reply) => {
+
+/*
+/api/auth
+
+Handles all authentication-related routes
+*/
+
+server.post('/api/auth/register', async (request, reply) => {
     const body = UserSchema.parse(request.body);
 
     try {
@@ -373,10 +412,11 @@ server.post<{ Body: { email: string, response: any } }>('/api/auth/passkey/login
             expectedChallenge,
             expectedOrigin: origin,
             expectedRPID: rpID,
-            authenticatorInfo: {
-                credentialID: Buffer.from(credentialResult.rows[0].metadata.credentialID),
-                credentialPublicKey: Buffer.from(credentialResult.rows[0].metadata.credentialPublicKey),
-                counter: credentialResult.rows[0].metadata.counter
+            credential: {
+                id: response.id,
+                publicKey: credentialResult.rows[0].metadata.publicKey,
+                counter: credentialResult.rows[0].metadata.counter,
+                transports: ['internal'],
             }
         });
 
@@ -393,7 +433,7 @@ server.post<{ Body: { email: string, response: any } }>('/api/auth/passkey/login
 });
 
 
-server.post('/api/login', async (request, reply) => {
+server.post('/api/auth/login', async (request, reply) => {
     const { email, password } = LoginSchema.parse(request.body);
 
     const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
@@ -423,6 +463,27 @@ server.post('/api/login', async (request, reply) => {
     // return { user: { id: user.id, email: user.email, name: user.name }, token };
 });
 
+
+server.get('/api/auth/authenticate', async (request, reply) => {
+    try {
+        // check if the request contains a valid JWT, and return the user if so
+        const token = request.headers.authorization?.replace('Bearer ', '');
+        if (!token) {
+            reply.code(401).send({ error: 'No token provided' });
+            return;
+        }
+        const user = await server.jwt.verify(token);
+        return { user };
+    } catch (err) {
+        reply.code(401).send({ error: 'Unauthorized' });
+    }
+});
+
+server.get('/api/auth/available-methods', async (request, reply) => {
+    const result = await pool.query('SELECT DISTINCT type FROM auth_methods');
+    return { methods: result.rows.map(row => row.type) };
+});
+
 // Protected route example
 // server.get('/api/user', {
 //     onRequest: [server.authenticate],
@@ -434,6 +495,10 @@ server.post('/api/login', async (request, reply) => {
 
 
 // SSO routes
+
+/*
+let ssoOptions = {};
+
 server.get('/auth/google', passport.authenticate('google', {
     scope: ['profile', 'email']
 }));
@@ -461,6 +526,13 @@ server.get('/auth/line/callback',
         reply.redirect(`${process.env.FRONTEND_URL}/auth/callback?token=${token}`);
     }
 );
+*/
+
+/*
+/auth/users
+
+Handles all user-related routes
+*/
 
 server.get('/api/users/:fnc', async (request, reply) => {
     // Destructure the "fnc" parameter from the request

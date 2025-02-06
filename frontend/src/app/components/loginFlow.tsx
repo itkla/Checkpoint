@@ -87,6 +87,8 @@ export default function LoginFlow() {
         // Handle method selection
     };
 
+    // if logged in successfully, redirect to original redirect URL and store token in local storage
+
     return (
         <div className="space-y-6">
             {availableMethods.map((method) => (

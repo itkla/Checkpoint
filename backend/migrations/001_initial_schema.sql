@@ -67,6 +67,15 @@ CREATE TABLE user_roles (
   PRIMARY KEY (user_id, role_id)
 );
 
+-- Create audit_logs table
+CREATE TABLE audit_logs (
+  id SERIAL PRIMARY KEY,
+  user_id INT REFERENCES users(id),
+  action VARCHAR(50) NOT NULL,
+  details JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Create indexes for better performance
 CREATE INDEX idx_auth_methods_user_id ON auth_methods(user_id);
 CREATE INDEX idx_user_sso_connections_user_id ON user_sso_connections(user_id);
