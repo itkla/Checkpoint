@@ -1,19 +1,48 @@
-import { z } from "zod";
+// types/user.ts
+export interface User {
+    id: string;
+    email: string;
+    first_name?: string;
+    last_name?: string;
+    name?: string;
+    role?: string;
+    active: boolean;
+    profile_pic?: string;
+    phone?: string;
+    department?: string;
+    joined_date?: string;
+    last_login?: string;
+    permissions?: string[];
+}
 
-export const userSchema = z.object({
-    id: z.string().optional(),
-    name: z.string().min(1, "名前は必須です"),
-    email: z.string().email("有効なメールアドレスを入力してください"),
-    role: z.enum(["Admin", "Editor", "Viewer"], {
-        required_error: "役割を選択してください",
-    }),
-    active: z.boolean(),
-    profile_pic: z.string().url().optional(),
-    department: z.string().optional(),
-    phone: z.string().regex(/^[0-9-+\s()]*$/, "無効な電話番号形式です").optional(),
-    joined_date: z.string().optional(),
-    last_login: z.string().optional(),
-    permissions: z.array(z.string()).optional(),
-});
+export interface AuthResponse {
+    user: User;
+    token: string;
+}
 
-export type User = z.infer<typeof userSchema>;
+export interface LoginCredentials {
+    email: string;
+    password: string;
+}
+
+export interface PasskeyCredential {
+    id: string;
+    rawId: string;
+    response: {
+        clientDataJSON: string;
+        authenticatorData: string;
+        signature: string;
+        userHandle?: string;
+    };
+    type: 'public-key';
+}
+
+// Add any other related types here
+export interface UserAuthMethod {
+    id: string;
+    type: 'password' | 'passkey' | 'biometric' | 'sso';
+    is_preferred: boolean;
+    metadata?: Record<string, any>;
+    created_at: string;
+    last_used_at?: string;
+}

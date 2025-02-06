@@ -9,19 +9,19 @@ DROP TABLE IF EXISTS users;
 
 -- Create users table
 CREATE TABLE users (
-    id SERIAL PRIMARY KEY,
+    id VARCHAR(20) PRIMARY KEY,
     email VARCHAR(255) UNIQUE NOT NULL,
-    first_name VARCHAR(255) NOT NULL,
-    last_name VARCHAR(255) NOT NULL,
-    private_key VARCHAR(255) NOT NULL,
-    public_key VARCHAR(255) NOT NULL,
+    first_name VARCHAR(255) NULL,
+    last_name VARCHAR(255) NULL,
+    private_key TEXT NOT NULL,
+    public_key TEXT NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Create auth_methods table
 CREATE TABLE auth_methods (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    user_id VARCHAR(20) REFERENCES users(id) ON DELETE CASCADE,
     type VARCHAR(50) NOT NULL, -- 'password', 'passkey', 'biometric', 'sso'
     is_preferred BOOLEAN DEFAULT false,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -46,7 +46,7 @@ CREATE TABLE sso_providers (
 -- Create user_sso_connections table
 CREATE TABLE user_sso_connections (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    user_id VARCHAR(20) REFERENCES users(id) ON DELETE CASCADE,
     provider_id INTEGER REFERENCES sso_providers(id) ON DELETE CASCADE,
     external_user_id VARCHAR(255) NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
@@ -57,12 +57,16 @@ CREATE TABLE user_sso_connections (
 CREATE TABLE roles (
   id SERIAL PRIMARY KEY,
   name VARCHAR(50) UNIQUE NOT NULL,
-  description TEXT
+  permissions JSONB DEFAULT '[]'::JSONB,
+  icon VARCHAR(255),
+  description TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(name) -- or some other unique constraint
 );
 
 -- Create user_roles table
 CREATE TABLE user_roles (
-  user_id INT REFERENCES users(id),
+  user_id VARCHAR(20) REFERENCES users(id),
   role_id INT REFERENCES roles(id),
   PRIMARY KEY (user_id, role_id)
 );
@@ -70,9 +74,44 @@ CREATE TABLE user_roles (
 -- Create audit_logs table
 CREATE TABLE audit_logs (
   id SERIAL PRIMARY KEY,
-  user_id INT REFERENCES users(id),
+  user_id VARCHAR(20) REFERENCES users(id),
   action VARCHAR(50) NOT NULL,
   details JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create password_resets table
+CREATE TABLE password_resets (
+  id SERIAL PRIMARY KEY,
+  user_id VARCHAR(20) REFERENCES users(id),
+  token VARCHAR(255) NOT NULL,
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create sessions table
+CREATE TABLE sessions (
+  id SERIAL PRIMARY KEY,
+  user_id VARCHAR(20) REFERENCES users(id),
+  token VARCHAR(255) NOT NULL,
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create user_settings table
+CREATE TABLE user_settings (
+  user_id VARCHAR(20) REFERENCES users(id),
+  key VARCHAR(50) NOT NULL,
+  value JSONB,
+  PRIMARY KEY (user_id, key)
+);
+
+-- Create email_verifications table
+CREATE TABLE email_verifications (
+  id SERIAL PRIMARY KEY,
+  user_id VARCHAR(20) REFERENCES users(id),
+  token VARCHAR(255) NOT NULL,
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 

@@ -66,7 +66,7 @@ export function UserDetailDialog({
                             <div className="pt-4">
                                 <h4 className="font-medium text-gray-900 mb-2">ステータス</h4>
                                 <Badge
-                                    variant={user.active ? "success" : "destructive"}
+                                    variant={user.active ? "default" : "destructive"}
                                     className="text-xs"
                                 >
                                     {user.active ? 'アクティブ' : '非アクティブ'}

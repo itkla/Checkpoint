@@ -1,40 +1,94 @@
+// components/users/UserTable.tsx
 import { useState } from 'react';
-import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '@/lib/api-client';
+import type { User } from '@/app/types/user';
+import { 
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Button } from '@/components/ui/button';
 import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { EllipsisVerticalIcon } from '@heroicons/react/24/solid';
-import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
 import { UserDetailDialog } from './UserDetailDialog';
-import type { User } from '@/app/types/user';
 
-interface UserTableProps {
-    users: User[];
-    onEdit: (user: User) => void;
-    onDelete: (user: User) => void;
-}
+interface TableProps {
+    onUserSelect?: (user: User) => void;
+  }
 
-export default function UserTable({ users, onEdit, onDelete }: UserTableProps) {
+export default function UserTable() {
     const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
-    const [selectedUser, setSelectedUser] = useState<User | null>(null);
+    const [searchQuery, setSearchQuery] = useState('');
     const [showDetails, setShowDetails] = useState(false);
+    const [selectedUser, setSelectedUser] = useState<User | null>(null);
+    const { toast } = useToast();
+    const queryClient = useQueryClient();
 
-    const toggleUser = (email: string) => {
+    // Fetch users
+    const { data: users = [], isLoading, error } = useQuery({
+        queryKey: ['users'],
+        queryFn: () => api.users.getUsers(),
+      });
+
+    // Delete mutation
+    const deleteMutation = useMutation({
+        mutationFn: (userId: string) => api.users.deleteUser(userId),
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: ['users'] });
+          toast({ title: "成功", description: "ユーザーを削除しました" });
+        },
+        onError: () => {
+          toast({
+            title: "エラー",
+            description: "ユーザーの削除に失敗しました",
+            variant: "destructive"
+          });
+        },
+      });
+
+    // Update mutation
+    const updateMutation = useMutation({
+        mutationFn: (user: User) => api.users.updateUser(user.id, user),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['users'] });
+            toast({
+                title: "成功",
+                description: "ユーザー情報を更新しました",
+            });
+        },
+        onError: () => {
+            toast({
+                title: "エラー",
+                description: "ユーザーの更新に失敗しました",
+                variant: "destructive",
+            });
+        },
+    });
+
+    const handleEdit = (user: User) => {
+        updateMutation.mutate(user);
+    };
+
+    const handleDelete = (user: User) => {
+        deleteMutation.mutate(user.id);
+    };
+
+    const toggleUser = (userId: string) => {
         setSelectedUsers(prev =>
-            prev.includes(email)
-                ? prev.filter(e => e !== email)
-                : [...prev, email]
+            prev.includes(userId)
+                ? prev.filter(id => id !== userId)
+                : [...prev, userId]
         );
     };
 
@@ -43,44 +97,65 @@ export default function UserTable({ users, onEdit, onDelete }: UserTableProps) {
         setShowDetails(true);
     };
 
+    if (isLoading) {
+        return <div className="flex justify-center p-4">Loading...</div>;
+    }
+
+    if (error) {
+        return (
+            <div className="text-red-500 p-4">
+                エラーが発生しました
+            </div>
+        );
+    }
+
     return (
         <>
             <Table>
                 <TableHeader>
                     <TableRow>
                         <TableHead className="w-12">
-                            <Checkbox />
+                            <Checkbox
+                                checked={selectedUsers.length === users.length}
+                                onCheckedChange={(checked) => {
+                                    if (checked) {
+                                        setSelectedUsers(users.map(user => user.id));
+                                    } else {
+                                        setSelectedUsers([]);
+                                    }
+                                }}
+                            />
                         </TableHead>
                         <TableHead>名前</TableHead>
                         <TableHead>メールアドレス</TableHead>
                         <TableHead>役割</TableHead>
                         <TableHead>状態</TableHead>
-                        <TableHead className="text-right">Actions</TableHead>
+                        <TableHead className="text-right">アクション</TableHead>
                     </TableRow>
                 </TableHeader>
                 <TableBody>
                     {users.map((user) => (
                         <TableRow
-                            key={user.email}
+                            key={user.id}
                             onClick={() => handleRowClick(user)}
                             className="cursor-pointer"
                         >
                             <TableCell onClick={(e) => e.stopPropagation()}>
                                 <Checkbox
-                                    checked={selectedUsers.includes(user.email)}
-                                    onCheckedChange={() => toggleUser(user.email)}
+                                    checked={selectedUsers.includes(user.id)}
+                                    onCheckedChange={() => toggleUser(user.id)}
                                 />
                             </TableCell>
                             <TableCell className="flex items-center">
                                 <img
-                                    src={user.profile_pic}
-                                    alt={user.name}
+                                    src={user.profile_pic || "https://placehold.co/50"}
+                                    alt={user.first_name || user.email}
                                     className="w-6 h-6 rounded-full mr-2"
                                 />
-                                {user.name}
+                                {user.first_name || user.email}
                             </TableCell>
                             <TableCell>{user.email}</TableCell>
-                            <TableCell>{user.role}</TableCell>
+                            <TableCell>{user.role || 'N/A'}</TableCell>
                             <TableCell>
                                 {user.active ? (
                                     <span className="text-green-600 font-medium">アクティブ</span>
@@ -96,11 +171,15 @@ export default function UserTable({ users, onEdit, onDelete }: UserTableProps) {
                                         </Button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end">
-                                        <DropdownMenuItem onClick={() => onEdit(user)}>
+                                        <DropdownMenuItem
+                                            onClick={() => handleEdit(user)}
+                                            disabled={updateMutation.isPending}
+                                        >
                                             編集
                                         </DropdownMenuItem>
                                         <DropdownMenuItem
-                                            onClick={() => onDelete(user)}
+                                            onClick={() => handleDelete(user)}
+                                            disabled={deleteMutation.isPending}
                                             className="text-red-600"
                                         >
                                             削除
@@ -117,7 +196,7 @@ export default function UserTable({ users, onEdit, onDelete }: UserTableProps) {
                 user={selectedUser}
                 open={showDetails}
                 onOpenChange={setShowDetails}
-                onEdit={onEdit}
+                onEdit={handleEdit}
             />
         </>
     );

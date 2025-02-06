@@ -2,10 +2,11 @@
 import fastify from 'fastify';
 import cors from '@fastify/cors';
 import jwt, { JWT } from '@fastify/jwt';
+import cookie from '@fastify/cookie';
 import { Pool } from 'pg';
 // import bcrypt from 'bcrypt';
 import * as argon2 from 'argon2';
-import { z } from 'zod';
+import { z, ZodError } from 'zod';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
@@ -15,12 +16,12 @@ import { createClient } from 'redis';
 const redis = createClient({
     // url: `redis://:${process.env.REDIS_PASSWORD}@${process.env.REDIS_HOST}:${process.env.REDIS_PORT}`,
 });
-try {
-    redis.connect().catch(console.error);
-    console.log('Connected to Redis');
-} catch (err) {
-    console.error("An error occurred connecting to Redis: " + err);
-}
+redis.connect()
+    .then(() => console.log('Connected to Redis'))
+    .catch((err) => {
+        console.error('An error occurred connecting to Redis:', err);
+        process.exit(1);
+    });
 
 
 import type {
@@ -40,20 +41,45 @@ import type {
     AuthenticationResponseJSON,
 } from '@simplewebauthn/types';
 
-import passport from '@fastify/passport';
+import passport, { PassportUser } from '@fastify/passport';
 import fastifySecureSession from '@fastify/secure-session';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { Strategy as LineStrategy } from 'passport-line';
+
+import { encryptPrivateKey, EncryptedPayload } from './utils/crypto-utils';
+
+type UserIdParam = {
+    id: string;  // The 'id' param is a string (e.g. your random 20-char user ID)
+};
+
+type AuthMethodIdParam = {
+    authMethodId: string;
+};
+
+type ProviderIdParam = {
+    id: string;
+};
+
+type RoleIdBody = {
+    roleId: number;  // The body contains 'roleId' when assigning a role to a user
+};
+
+type SsoConnectionBody = {
+    provider_id: number;
+    external_user_id: string;
+};
 
 // Extend FastifyInstance type to include JWT
 declare module 'fastify' {
     interface FastifyRequest {
         jwtUser: {
             userId: string | number;
+            isAdmin?: boolean;
         };
     }
     interface FastifyInstance {
         jwt: JWT;
+        authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
     }
 }
 
@@ -71,10 +97,10 @@ declare module '@fastify/jwt' {
         user: {
             id: string | number;
             email?: string;
+            isAdmin?: boolean;
         }
     }
 }
-
 
 dotenv.config();
 
@@ -87,6 +113,61 @@ const pool = new Pool({
 });
 
 const server = fastify({ logger: true });
+
+server.setErrorHandler((error, request, reply) => {
+    if (error instanceof ZodError) {
+        reply.code(400).send({
+            statusCode: 400,
+            error: 'Bad Request',
+            issues: error.issues.map((issue) => ({
+                format: issue
+
+            }))
+        });
+        return;
+    }
+    reply.status(error.statusCode || 500).send({
+        statusCode: error.statusCode || 500,
+
+        error: error.name,
+        message: error.message,
+    });
+});
+
+server.decorate('authenticate', async (request, reply) => {
+    try {
+        // 1) Get token from either 'Authorization' header or cookie
+        const authHeader = request.headers.authorization;
+        let token: string | undefined;
+
+        if (authHeader?.startsWith('Bearer ')) {
+            token = authHeader.substring(7); // strip 'Bearer '
+        } else {
+            // fallback to cookie if you store it there
+            token = request.cookies.checkpoint_jwt;
+        }
+
+        if (!token) {
+            return reply.code(401).send({ error: 'No token provided' });
+        }
+
+        // 2) Verify JWT -> populates request.jwtUser (because of `namespace: 'jwtUser'`)
+        // or throws if invalid
+        const decoded = await request.jwtVerify();
+
+        const sessionKey = `session:${token}`;
+        const sessionUserId = await redis.get(sessionKey);
+
+        if (!sessionUserId) {
+            return reply.code(401).send({ error: 'Invalid session' });
+        }
+
+        // If valid, we continue to the route handler
+    } catch (err) {
+        // If verification failed or anything else, 401
+        reply.code(401).send({ error: 'Unauthorized' });
+    }
+});
 
 const rpName = 'Checkpoint';
 const rpID = process.env.DOMAIN || 'localhost';
@@ -108,10 +189,10 @@ server.register(passport.initialize());
 server.register(jwt, {
     secret: process.env.JWT_SECRET!,
     // decorateRequest: true,
-    namespace: 'jwtUser'
+    namespace: 'jwtUser',
+    decoratorName: 'jwtUSer'
 });
 server.register(passport.secureSession());
-
 
 // Configure SSO providers
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
@@ -198,12 +279,14 @@ if (process.env.LINE_CHANNEL_ID && process.env.LINE_CHANNEL_SECRET) {
 
 // Schema definitions
 const UserSchema = z.object({
+    id: z.string(),
     email: z.string().email(),
     password: z.string().min(8),
     first_name: z.string().optional(),
     last_name: z.string().optional(),
     public_key: z.string().optional(),
     private_key: z.string().optional(),
+    profile_pic: z.string().optional(),
 });
 
 const LoginSchema = z.object({
@@ -293,6 +376,45 @@ async function auditLog(user_id: string, event: string, details: Record<string, 
     );
 }
 
+async function getUserPermissions(userId: string): Promise<Set<string>> {
+    const rolesRes = await pool.query(
+        `SELECT r.permissions
+           FROM user_roles ur
+           JOIN roles r ON ur.role_id = r.id
+          WHERE ur.user_id = $1`,
+        [userId]
+    );
+    const allPerms = new Set<string>();
+    for (const row of rolesRes.rows) {
+        const permsArray: string[] = row.permissions?.permissions || row.permissions;
+        // If row.permissions is { permissions: [...] }, adjust accordingly
+        permsArray.forEach(p => allPerms.add(p));
+    }
+    return allPerms;
+}
+
+async function hasPermission(userId: string, permission: string): Promise<boolean> {
+    const allPerms = await getUserPermissions(userId);
+    return allPerms.has(permission) || allPerms.has('*');
+}
+
+async function generateUUID() {
+    const chars = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    // return Array.from({ length: 20 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    // Check if UUID exists in database
+    let uuid = Array.from({ length: 20 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+    let exists = true;
+    while (exists) {
+        const result = await pool.query('SELECT id FROM users WHERE id = $1', [uuid]);
+        if (result.rowCount === 0) {
+            exists = false;
+        } else {
+            uuid = Array.from({ length: 20 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+        }
+    }
+    return uuid;
+}
+
 // Routes
 
 /*
@@ -314,9 +436,12 @@ server.post('/api/auth/register', async (request, reply) => {
             format: 'armored'
         });
 
+        const encryptedPrivateKey: EncryptedPayload = encryptPrivateKey(privateKey);
+
+        const userId = await generateUUID();
         const result = await pool.query(
-            'INSERT INTO users (email, first_name, last_name, public_key, private_key) VALUES ($1, $2, $3, $4, $5) RETURNING id, email, first_name, last_name',
-            [body.email, body.first_name, body.last_name, publicKey, privateKey]
+            'INSERT INTO users (id, email, public_key, private_key) VALUES ($1, $2, $3, $4) RETURNING id, email',
+            [userId, body.email, publicKey, encryptedPrivateKey]
         );
 
         if (body.password) {
@@ -329,7 +454,13 @@ server.post('/api/auth/register', async (request, reply) => {
             );
         }
 
-        const token = server.jwt.sign({ userId: result.rows[0].id });
+        const token = server.jwt.sign(
+            { userId: result.rows[0].id },
+            { expiresIn: '60d' }
+        );
+        await redis.set(`session:${token}`, String(result.rows[0].id), {
+            EX: 60 * 60 * 24 * 60 // 60 days;
+        });
         return { user: result.rows[0], token };
     } catch (err: any) {
         if (err.constraint === 'users_email_key') {
@@ -422,7 +553,24 @@ server.post<{ Body: { email: string, response: any } }>('/api/auth/passkey/login
 
         if (verification.verified) {
             // Issue a JWT on successful passkey authentication
-            const token = server.jwt.sign({ userId: user.id });
+            const rolesRes = await pool.query(
+                `SELECT r.name 
+            FROM user_roles ur
+            JOIN roles r ON ur.role_id = r.id
+            WHERE ur.user_id = $1`,
+                [user.id]
+            );
+            const roles = rolesRes.rows.map(row => row.name);
+            const isAdmin = roles.includes('admin');
+        
+            // Sign and return a JWT token
+            const token = server.jwt.sign(
+                { userId: user.id, isAdmin },
+                { expiresIn: '60d' }
+            );
+            await redis.set(`session:${token}`, String(user.id), {
+                EX: 60 * 60 * 24 * 60 // 60 days;
+            });
             reply.send({ token });
         } else {
             reply.code(400).send({ error: 'Authentication failed' });
@@ -431,7 +579,81 @@ server.post<{ Body: { email: string, response: any } }>('/api/auth/passkey/login
         reply.code(400).send({ error: 'Invalid authentication response' });
     }
 });
+server.post('/api/auth/passkey/register/start', async (request, reply) => {
+    const { userId } = request.jwtUser;
+    const userResult = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
+    if (userResult.rowCount === 0) {
+        reply.code(400).send({ error: 'User does not exist.' });
+        return;
+    }
+    const user = userResult.rows[0];
 
+    // Generate registration options for passkey
+    const options = generateRegistrationOptions({
+        rpName,
+        rpID,
+        userID: user.id.toString(),
+        userName: user.email,
+        timeout: 60000,
+        authenticatorSelection: {
+            userVerification: 'preferred'
+        },
+    });
+
+    // Store the challenge in Redis for later verification
+    await redis.set(`registration_${user.id}`, JSON.stringify(options), { EX: 300 });
+    reply.send(options);
+});
+
+server.post('/api/auth/passkey/register/complete', async (request, reply) => {
+    const { userId } = request.jwtUser;
+    const userResult = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
+    const passkeyData = request.body as RegistrationResponseJSON
+    if (userResult.rowCount === 0) {
+        reply.code(400).send({ error: 'User does not exist.' });
+        return;
+    }
+    const user = userResult.rows[0];
+
+    // Retrieve the expected challenge from Redis
+    const expectedChallenge = await redis.get(`registration_${user.id}`);
+    if (!expectedChallenge) {
+        reply.code(400).send({ error: 'Registration session expired' });
+        return;
+    }
+
+    try {
+        // Verify the registration response using @simplewebauthn/server
+        const verification = await verifyRegistrationResponse({
+            response: passkeyData,
+            expectedChallenge,
+            expectedOrigin: origin,
+            expectedRPID: rpID,
+            // attestationType: 'none',
+            // authenticatorSelection: {
+            //     userVerification: 'preferred'
+            // },
+        });
+
+        if (verification.verified) {
+            // Store the credential in the database
+            const credential = verification.registrationInfo;
+            await pool.query(
+                'INSERT INTO auth_methods (user_id, type, metadata) VALUES ($1, $2, $3)',
+                [user.id, 'passkey', {
+                    credentialID: credential.credential.id,
+                    publicKey: credential.credential.publicKey,
+                    counter: '0',
+                }]
+            );
+            reply.send({ success: true });
+        } else {
+            reply.code(400).send({ error: 'Registration failed' });
+        }
+    } catch (err) {
+        reply.code(400).send({ error: 'Invalid registration response' });
+    }
+});
 
 server.post('/api/auth/login', async (request, reply) => {
     const { email, password } = LoginSchema.parse(request.body);
@@ -455,9 +677,33 @@ server.post('/api/auth/login', async (request, reply) => {
         return;
     }
 
+    const rolesRes = await pool.query(
+        `SELECT r.name 
+    FROM user_roles ur
+    JOIN roles r ON ur.role_id = r.id
+    WHERE ur.user_id = $1`,
+        [user.id]
+    );
+    const roles = rolesRes.rows.map(row => row.name);
+    const isAdmin = roles.includes('admin');
+
     // Sign and return a JWT token
-    const token = server.jwt.sign({ userId: user.id });
-    reply.send({ user: { id: user.id, email: user.email }, token });
+    const token = server.jwt.sign(
+        { userId: user.id, isAdmin },
+        { expiresIn: '60d' }
+    );
+    await redis.set(`session:${token}`, String(user.id), {
+        EX: 60 * 60 * 24 * 60 // 60 days;
+    });
+
+    reply
+        .setCookie('checkpoint_jwt', token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            path: '/',
+            // maxAge: 3600 // (optional) 1 hour in seconds
+        })
+        .send({ user: { id: user.id, email: user.email }, token });
 
     // const token = server.jwt.sign({ userId: user.id });
     // return { user: { id: user.id, email: user.email, name: user.name }, token };
@@ -484,6 +730,137 @@ server.get('/api/auth/available-methods', async (request, reply) => {
     return { methods: result.rows.map(row => row.type) };
 });
 
+server.post('/api/auth/password-reset', async (request, reply) => {
+    const { email } = request.body as { email: string };
+    try {
+        // 1) Validate user exists
+        const userResult = await pool.query(`SELECT id FROM users WHERE email = $1`, [email]);
+        if (userResult.rowCount === 0) {
+            // Do not reveal if the user doesn't exist (for privacy)
+            return reply.send({ success: true });
+        }
+        const userId = userResult.rows[0].id;
+
+        // 2) Generate token (like a random string)
+        const resetToken = generateUUID(); // or your random generator
+        // 3) Store token in DB or Redis with an expiration
+        await pool.query(
+            `INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1, $2, NOW() + INTERVAL '1 hour')`,
+            [userId, resetToken]
+        );
+
+        // 4) Email or otherwise deliver reset link
+        // e.g. sendMail(user.email, `Your reset link: ${FRONTEND_URL}/reset?token=${resetToken}`)
+
+        reply.send({ success: true });
+    } catch (err) {
+        reply.status(500).send({ error: 'Database error' });
+    }
+});
+
+server.post('/api/auth/password-reset/complete', async (request, reply) => {
+    const { token, newPassword } = request.body as { token: string; newPassword: string };
+
+    try {
+        // 1) Validate token
+        const prResult = await pool.query(
+            `SELECT user_id FROM password_resets WHERE token = $1 AND expires_at > NOW()`,
+            [token]
+        );
+        if (prResult.rowCount === 0) {
+            return reply.status(400).send({ error: 'Invalid or expired reset token' });
+        }
+        const userId = prResult.rows[0].user_id;
+
+        // 2) Hash new password
+        const hashedPassword = await argon2.hash(newPassword);
+
+        // 3) Update auth_methods
+        await pool.query(
+            `UPDATE auth_methods
+            SET hashed_password = $1
+          WHERE user_id = $2
+            AND type = 'password'`,
+            [hashedPassword, userId]
+        );
+
+        // 4) Invalidate or remove the used token
+        await pool.query(`DELETE FROM password_resets WHERE token = $1`, [token]);
+
+        reply.send({ success: true });
+    } catch (err) {
+        reply.status(500).send({ error: 'Database error' });
+    }
+});
+
+server.post('/api/auth/change-password', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const { oldPassword, newPassword } = request.body as {
+            oldPassword: string;
+            newPassword: string;
+        };
+        const userId = request.jwtUser.userId;
+
+        // Check if user has permission or if you rely solely on user matching
+        // E.g. if ( ! await hasPermission(userId, 'users.updateSelf') ) ...
+
+        try {
+            // 1) Get current hashed password
+            const authMethodRes = await pool.query(
+                `SELECT hashed_password FROM auth_methods 
+            WHERE user_id = $1 AND type = 'password'`,
+                [userId]
+            );
+            if (authMethodRes.rowCount === 0) {
+                return reply.status(400).send({ error: 'No password set' });
+            }
+            const { hashed_password } = authMethodRes.rows[0];
+
+            // 2) Verify old password
+            const validOld = await argon2.verify(hashed_password, oldPassword);
+            if (!validOld) {
+                return reply.status(401).send({ error: 'Incorrect old password' });
+            }
+
+            // 3) Hash new password
+            const newHashed = await argon2.hash(newPassword);
+
+            // 4) Update DB
+            await pool.query(
+                `UPDATE auth_methods SET hashed_password = $1 WHERE user_id = $2 AND type = 'password'`,
+                [newHashed, userId]
+            );
+
+            reply.send({ success: true });
+        } catch (err) {
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+// Suppose you store active tokens in a 'sessions' table in Redis
+server.post('/api/auth/sessions/revoke', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const userId = request.jwtUser.userId;
+        // e.g. only Admin can revoke sessions
+        if (!(await hasPermission(String(userId), 'sessions.revoke'))) {
+            return reply.status(403).send({ error: 'Forbidden' });
+        }
+
+        const { tokenId } = request.body as { tokenId: string };
+
+        try {
+            await redis.del(`session:${tokenId}`);
+            reply.send({ success: true });
+        } catch (err) {
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+
 // Protected route example
 // server.get('/api/user', {
 //     onRequest: [server.authenticate],
@@ -494,39 +871,190 @@ server.get('/api/auth/available-methods', async (request, reply) => {
 // });
 
 
-// SSO routes
-
 /*
-let ssoOptions = {};
 
-server.get('/auth/google', passport.authenticate('google', {
+SSO ROUTES
+
+*/
+
+server.get('/api/sso', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        try {
+            const result = await pool.query(
+                'SELECT id, name, client_id, config, created_at FROM sso_providers'
+            );
+            reply.send(result.rows);
+        } catch (err) {
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+server.post('/api/sso', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const { name, client_id, client_secret, config } = request.body as {
+            name: string;
+            client_id: string;
+            client_secret: string;
+            config?: any;
+        };
+
+        try {
+            const result = await pool.query(
+                `
+            INSERT INTO sso_providers (name, client_id, client_secret, config)
+                 VALUES ($1, $2, $3, COALESCE($4, '{}'))
+              RETURNING id, name, client_id, config, created_at
+          `,
+                [name, client_id, client_secret, config]
+            );
+            reply.send(result.rows[0]);
+        } catch (err: any) {
+            if (err.code === '23505') {
+                return reply.status(400).send({ error: 'SSO provider already exists' });
+            }
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+server.patch('/api/sso/:id', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const { id } = request.params as ProviderIdParam;
+        const { name, client_id, client_secret, config } = request.body as {
+            name?: string;
+            client_id?: string;
+            client_secret?: string;
+            config?: any;
+        };
+
+        try {
+            const result = await pool.query(
+                `
+            UPDATE sso_providers
+               SET name          = COALESCE($1, name),
+                   client_id     = COALESCE($2, client_id),
+                   client_secret = COALESCE($3, client_secret),
+                   config        = COALESCE($4, config)
+             WHERE id = $5
+             RETURNING id, name, client_id, config, created_at
+          `,
+                [name, client_id, client_secret, config, id]
+            );
+            if (result.rowCount === 0) {
+                return reply.status(404).send({ error: 'SSO provider not found' });
+            }
+            reply.send(result.rows[0]);
+        } catch (err) {
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+server.delete('/api/sso/:id', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const { id } = request.params as ProviderIdParam;
+        try {
+            const result = await pool.query(
+                'DELETE FROM sso_providers WHERE id = $1 RETURNING id',
+                [id]
+            );
+            if (result.rowCount === 0) {
+                return reply.status(404).send({ error: 'SSO provider not found' });
+            }
+            reply.send({ success: true, providerId: id });
+        } catch (err) {
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+server.get('/auth/sso/google', passport.authenticate('google', {
     scope: ['profile', 'email']
 }));
 
-server.get('/auth/google/callback',
-    passport.authenticate('google', { session: false }),
-    async (request, reply) => {
-        const token = server.jwt.sign({ userId: (request.user as PassportUser).id });
-        // Redirect to frontend with token
-        reply.redirect(`${process.env.FRONTEND_URL}/auth/callback?token=${token}`);
-    }
-);
+server.get('/auth/sso/google/callback', {
+    preHandler: passport.authenticate('google', { session: false }),
+    handler: async (request, reply) => {
+        const user = request.user as { id: number; email?: string };
 
-server.get('/auth/line',
+        // 3) Create your own JWT
+        const rolesRes = await pool.query(
+            `SELECT r.name 
+        FROM user_roles ur
+        JOIN roles r ON ur.role_id = r.id
+        WHERE ur.user_id = $1`,
+            [user.id]
+        );
+        const roles = rolesRes.rows.map(row => row.name);
+        const isAdmin = roles.includes('admin');
+    
+        // Sign and return a JWT token
+        const token = server.jwt.sign(
+            { userId: user.id, isAdmin },
+            { expiresIn: '60d' }
+        );
+        await redis.set(`session:${token}`, String(user.id), {
+            EX: 60 * 60 * 24 * 60 // 60 days;
+        });
+
+        // 4) Set it as an HTTP-only cookie
+        reply.setCookie('checkpoint_jwt', token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'none', // if the frontend is a different domain
+            path: '/',
+            // maxAge: 3600, // optional: 1 hour
+        });
+
+        // 5) Redirect the user to your frontend, WITHOUT the token
+        //    in the URL. "server-to-server" exchange is done.
+        reply.redirect(`${process.env.FRONTEND_URL}/dashboard`);
+    }
+});
+
+server.get('/auth/sso/line',
     passport.authenticate('line', {
         scope: ['profile', 'openid', 'email']
     })
 );
 
-server.get('/auth/line/callback',
-    passport.authenticate('line', { session: false }),
-    async (request, reply) => {
-        const token = server.jwt.sign({ userId: (request.user as PassportUser).id });
+server.get('/auth/sso/line/callback', {
+    preHandler: passport.authenticate('line', { session: false }),
+    handler: async (request, reply) => {
+        const user = request.user as PassportUser;
+
+        const rolesRes = await pool.query(
+            `SELECT r.name 
+        FROM user_roles ur
+        JOIN roles r ON ur.role_id = r.id
+        WHERE ur.user_id = $1`,
+            [user.id]
+        );
+        const roles = rolesRes.rows.map(row => row.name);
+        const isAdmin = roles.includes('admin');
+    
+        // Sign and return a JWT token
+        const token = server.jwt.sign(
+            { userId: user.id, isAdmin },
+            { expiresIn: '60d' }
+        );
+        await redis.set(`session:${token}`, String(user.id), {
+            EX: 60 * 60 * 24 * 60 // 60 days;
+        });
+
+        reply.setCookie('checkpoint_jwt', token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'none',
+        });
+
         // Redirect to frontend with token
         reply.redirect(`${process.env.FRONTEND_URL}/auth/callback?token=${token}`);
     }
-);
-*/
+});
 
 /*
 /auth/users
@@ -534,29 +1062,493 @@ server.get('/auth/line/callback',
 Handles all user-related routes
 */
 
-server.get('/api/users/:fnc', async (request, reply) => {
-    // Destructure the "fnc" parameter from the request
-    const { fnc } = request.params as { fnc: string };
+// get all users
+server.get('/api/users', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        try {
+            // If you want to restrict this to admins, do an additional check here:
+            if (!(await hasPermission(String(request.jwtUser.userId), 'users.search')) || !request.jwtUser.isAdmin) {
+                return reply.status(403).send({ error: 'Forbidden' });
+            }
 
-    // (Token verification comes next – see snippet 4)
-    // ...
-    if (fnc === 'all') {
-        const result = await pool.query('SELECT * FROM users');
-        reply.send(result.rows);
-    } else if (fnc !== "") {
-        const result = await pool.query('SELECT * FROM users WHERE id = $1', [fnc]);
-        reply.send(result.rows);
-    } else {
-        reply.send({ error: 'Invalid function' });
+            const { search, page = 1, pageSize = 10 } = request.query as {
+                search?: string;
+                page?: number;
+                pageSize?: number;
+            };
+            const offset = (page - 1) * pageSize;
+            const likeQuery = `%${search || ''}%`;
+
+            try {
+                const result = await pool.query(
+                    `
+                    SELECT id, email, first_name, last_name, created_at
+                        FROM users
+                    WHERE email ILIKE $1
+                        OR first_name ILIKE $1
+                        OR last_name ILIKE $1
+                    ORDER BY created_at DESC
+                    LIMIT $2 OFFSET $3
+                    `,
+                    [likeQuery, pageSize, offset]
+                );
+                reply.send(result.rows);
+            } catch (err) {
+                reply.status(500).send({ error: 'Database error' });
+            }
+        } catch (err) {
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+// get user's profile
+server.get('/api/users/:id', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const { id } = request.params as { id: string };
+        try {
+            if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+                return reply.status(403).send({ error: 'Forbidden' });
+            }
+
+            const result = await pool.query(
+                'SELECT id, email, first_name, last_name, public_key, created_at FROM users WHERE id = $1',
+                [id]
+            );
+            if (result.rowCount === 0) {
+                return reply.status(404).send({ error: 'User not found' });
+            }
+            reply.send(result.rows[0]);
+        } catch (err) {
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+// update user's profile
+server.put('/api/users/:id', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const toUpdate = UserSchema.parse(request.body);
+
+        try {
+            if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+                return reply.status(403).send({ error: 'Forbidden' });
+            }
+
+            const result = await pool.query(
+                'UPDATE users SET email = $1, first_name = $2, last_name = $3 WHERE id = $4 RETURNING *',
+                [toUpdate.email, toUpdate.first_name, toUpdate.last_name, id]
+            );
+            if (result.rowCount === 0) {
+                return reply.status(404).send({ error: 'User not found' });
+            }
+            reply.send(result.rows[0]);
+        } catch (err) {
+            reply.status(500).send({ error: 'Database error' });
+        };
     }
 });
 
-server.post('/api/users/:userId/assign-role', async (request, reply) => {
-    const { userId } = request.params as { userId: string };
-    const { roleId } = request.body as { roleId: number };
+// delete user
 
-    await pool.query('INSERT INTO user_roles (user_id, role_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [userId, roleId]);
-    reply.send({ success: true });
+server.delete('/api/users/:id', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const { id } = request.params as { id: string };
+        try {
+            // if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+            //   return reply.status(403).send({ error: 'Forbidden' });
+            // }
+
+            const result = await pool.query(
+                'DELETE FROM users WHERE id = $1 RETURNING id',
+                [id]
+            );
+            if (result.rowCount === 0) {
+                return reply.status(404).send({ error: 'User not found' });
+            }
+            reply.send({ success: true, userId: id });
+        } catch (err) {
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+// get user's auth methods
+server.get('/api/users/:id/auth-methods', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const { id } = request.params as { id: string };
+        try {
+            if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+                return reply.status(403).send({ error: 'Forbidden' });
+            }
+
+            const result = await pool.query(
+                `
+            SELECT id, type, is_preferred, metadata, created_at, last_used_at
+              FROM auth_methods
+             WHERE user_id = $1
+          `,
+                [id]
+            );
+            reply.send(result.rows);
+        } catch (err) {
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+// add auth method to user
+server.post('/api/users/:id/auth-methods', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const { id } = request.params as { id: string };
+        const { type, is_preferred, metadata } = request.body as {
+            type: 'password' | 'passkey' | 'biometric' | 'sso';
+            is_preferred?: boolean;
+            metadata?: any;
+        };
+
+        try {
+            if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+                return reply.status(403).send({ error: 'Forbidden' });
+            }
+
+            const result = await pool.query(
+                `
+            INSERT INTO auth_methods (user_id, type, is_preferred, metadata)
+                 VALUES ($1, $2, COALESCE($3, false), COALESCE($4, '{}'))
+              RETURNING id, type, is_preferred, metadata, created_at, last_used_at
+          `,
+                [id, type, is_preferred, metadata]
+            );
+            reply.send(result.rows[0]);
+        } catch (err: any) {
+            if (err.code === '23503') {
+                return reply.status(404).send({ error: 'User not found' });
+            }
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+// update auth method
+server.get('/api/users/:id/sso', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const { id } = request.params as { id: string };
+        try {
+            // if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+            //   return reply.status(403).send({ error: 'Forbidden' });
+            // }
+
+            const result = await pool.query(
+                `
+            SELECT usc.id,
+                   usc.provider_id,
+                   sp.name as provider_name,
+                   usc.external_user_id,
+                   usc.created_at
+              FROM user_sso_connections usc
+              JOIN sso_providers sp ON usc.provider_id = sp.id
+             WHERE usc.user_id = $1
+          `,
+                [id]
+            );
+            reply.send(result.rows);
+        } catch (err) {
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+// add sso connection to user
+server.post('/api/users/:id/sso', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const { id } = request.params as UserIdParam;
+        const { provider_id, external_user_id } = request.body as SsoConnectionBody;
+
+        try {
+            // if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+            //   return reply.status(403).send({ error: 'Forbidden' });
+            // }
+
+            const result = await pool.query(
+                `
+            INSERT INTO user_sso_connections (user_id, provider_id, external_user_id)
+                 VALUES ($1, $2, $3)
+              RETURNING id, user_id, provider_id, external_user_id, created_at
+          `,
+                [id, provider_id, external_user_id]
+            );
+            reply.send(result.rows[0]);
+        } catch (err: any) {
+            if (err.code === '23503') {
+                // foreign key violation for user or provider
+                return reply.status(404).send({ error: 'User or provider not found' });
+            }
+            if (err.code === '23505') {
+                // unique (provider_id, external_user_id)
+                return reply.status(400).send({ error: 'This SSO connection already exists' });
+            }
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+// add role to user
+server.post('/api/users/:id/role', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const { id } = request.params as UserIdParam;
+        const { roleId } = request.body as RoleIdBody;
+
+        try {
+            if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+                return reply.status(403).send({ error: 'Forbidden' });
+            }
+
+            await pool.query(
+                `
+            INSERT INTO user_roles (user_id, role_id)
+                 VALUES ($1, $2)
+            ON CONFLICT (user_id, role_id) DO NOTHING
+          `,
+                [id, roleId]
+            );
+            reply.send({ success: true });
+        } catch (err: any) {
+            if (err.code === '23503') {
+                // foreign key violation for user or role
+                return reply.status(404).send({ error: 'User or role not found' });
+            }
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+// remove role from user
+server.delete('/api/users/:id/role', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const { id } = request.params as UserIdParam;
+        const { roleId } = request.body as RoleIdBody;
+
+        try {
+            if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+                return reply.status(403).send({ error: 'Forbidden' });
+            }
+
+            const result = await pool.query(
+                'DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2 RETURNING user_id, role_id',
+                [id, roleId]
+            );
+            if (result.rowCount === 0) {
+                return reply.status(404).send({ error: 'User or role not found' });
+            }
+            reply.send({ success: true });
+        } catch (err) {
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+// get user's roles
+server.get('/api/users/:id/roles', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const { id } = request.params as UserIdParam;
+        try {
+            if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+                return reply.status(403).send({ error: 'Forbidden' });
+            }
+
+            const result = await pool.query(
+                `
+            SELECT r.id, r.name, r.description
+              FROM user_roles ur
+              JOIN roles r ON ur.role_id = r.id
+             WHERE ur.user_id = $1
+          `,
+                [id]
+            );
+            reply.send(result.rows);
+        } catch (err) {
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+/*
+
+ROLES ROUTES
+
+*/
+
+server.get('/api/roles', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        try {
+            const result = await pool.query('SELECT id, name, permissions, icon, description FROM roles');
+            reply.send(result.rows);
+        } catch (err) {
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+server.post('/api/roles', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const { name, description, permissions, icon } = request.body as {
+            name: string;
+            description?: string;
+            permissions?: string[];
+            icon?: string;
+        };
+        try {
+            const result = await pool.query(
+                `
+            INSERT INTO roles (name, description, permissions, icon)
+             VALUES ($1, $2, $3, $4)
+              RETURNING id, name, permissions, icon, description
+          `,
+                [name, description ?? null, permissions ?? [], icon ?? null]
+            );
+            reply.send(result.rows[0]);
+        } catch (err: any) {
+            if (err.code === '23505') {
+                return reply.status(400).send({ error: 'Role name already exists' });
+            }
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+server.post('/api/roles/:roleId/permissions', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const userId = request.jwtUser.userId;
+        // Only an admin can do this
+        if (!(await hasPermission(String(userId), 'roles.update'))) {
+            return reply.status(403).send({ error: 'Forbidden' });
+        }
+
+        const { roleId } = request.params as { roleId: string };
+        const { permissionsToAdd } = request.body as { permissionsToAdd: string[] };
+
+        try {
+            // 1) Get current permissions from DB
+            const rRes = await pool.query(`SELECT permissions FROM roles WHERE id = $1`, [roleId]);
+            if (rRes.rowCount === 0) {
+                return reply.status(404).send({ error: 'Role not found' });
+            }
+            let perms = rRes.rows[0].permissions || [];
+            // 2) Merge in the new perms
+            perms = Array.from(new Set([...perms, ...permissionsToAdd])); // deduplicate
+            // 3) Update
+            await pool.query(`UPDATE roles SET permissions = $1 WHERE id = $2`, [JSON.stringify(perms), roleId]);
+            reply.send({ success: true, updatedPermissions: perms });
+        } catch (err) {
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+
+
+/*
+
+AUTH METHODS ROUTES
+
+*/
+
+server.patch('/api/auth-methods/:authMethodId', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const { authMethodId } = request.params as AuthMethodIdParam;
+        const { is_preferred, metadata } = request.body as {
+            is_preferred?: boolean;
+            metadata?: any;
+        };
+
+        try {
+            const result = await pool.query(
+                `
+            UPDATE auth_methods
+               SET is_preferred = COALESCE($1, is_preferred),
+                   metadata = COALESCE($2, metadata)
+             WHERE id = $3
+             RETURNING id, user_id, type, is_preferred, metadata, created_at, last_used_at
+          `,
+                [is_preferred, metadata, authMethodId]
+            );
+            if (result.rowCount === 0) {
+                return reply.status(404).send({ error: 'Auth method not found' });
+            }
+            reply.send(result.rows[0]);
+        } catch (err) {
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+// (2.4) DELETE AN AUTH METHOD
+server.delete('/api/auth-methods/:authMethodId', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        const { authMethodId } = request.params as AuthMethodIdParam;
+        try {
+            const result = await pool.query(
+                'DELETE FROM auth_methods WHERE id = $1 RETURNING id',
+                [authMethodId]
+            );
+            if (result.rowCount === 0) {
+                return reply.status(404).send({ error: 'Auth method not found' });
+            }
+            reply.send({ success: true, authMethodId });
+        } catch (err) {
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
+});
+
+/*
+
+AUDIT LOGS ROUTES
+
+*/
+
+server.get('/api/audit-logs', {
+    onRequest: [server.authenticate],
+    handler: async (request, reply) => {
+        try {
+            // Possibly check if request.jwtUser.isAdmin
+
+            const result = await pool.query(
+                `
+            SELECT al.id,
+                   al.user_id,
+                   al.action,
+                   al.details,
+                   al.created_at,
+                   u.email as user_email
+              FROM audit_logs al
+         LEFT JOIN users u ON al.user_id = u.id
+          ORDER BY al.created_at DESC
+          `
+            );
+            reply.send(result.rows);
+        } catch (err) {
+            reply.status(500).send({ error: 'Database error' });
+        }
+    },
 });
 
 // Start server

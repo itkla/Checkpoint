@@ -1,33 +1,61 @@
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { startAuthentication } from '@simplewebauthn/browser';
 import { Button } from '@/components/ui/button';
 import { PasskeyDialog } from './PasskeyDialog';
-import { usePasskey } from '@/app/hooks/usePasskey';
+import { authApi } from '@/lib/api-client';
+import { useToast } from '@/hooks/use-toast';
 
-export const PasskeyButton: React.FC = () => {
+interface PasskeyButtonProps {
+    email: string;
+}
+
+export function PasskeyButton({ email }: PasskeyButtonProps) {
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
     const [statusMessage, setStatusMessage] = useState('パスキーを使用してログイン');
-    const { initiatePasskeyLogin, isLoading, error } = usePasskey();
+    const router = useRouter();
+    const { toast } = useToast();
 
     const handlePasskeyLogin = async () => {
+        if (!email) {
+            toast({
+                title: "エラー",
+                description: "メールアドレスを入力してください",
+                variant: "destructive",
+            });
+            return;
+        }
+
         setIsDialogOpen(true);
         setStatus('loading');
-        setStatusMessage('認証中...');
+        setStatusMessage('パスキーを準備中...');
 
         try {
-            await initiatePasskeyLogin();
-            setStatus('success');
-            setStatusMessage('認証成功');
+            const options = await authApi.initiatePasskey(email);
+            setStatusMessage('パスキーを使用して認証してください');
 
-            // Close dialog and redirect after short delay
-            setTimeout(() => {
-                setIsDialogOpen(false);
-            }, 1500);
+            const credential = await startAuthentication(options);
+            setStatusMessage('認証を確認中...');
+
+            const response = await authApi.completePasskey(email, credential);
+
+            if (response.token) {
+                setStatus('success');
+                setStatusMessage('認証成功！');
+                localStorage.setItem('token', response.token);
+
+                setTimeout(() => {
+                    router.push('/dashboard');
+                }, 1500);
+            } else {
+                throw new Error('認証に失敗しました');
+            }
         } catch (err) {
+            console.error('Passkey authentication error:', err);
             setStatus('error');
-            setStatusMessage(error || '認証に失敗しました');
+            setStatusMessage(err instanceof Error ? err.message : '認証に失敗しました');
 
-            // Reset to idle state after error
             setTimeout(() => {
                 setStatus('idle');
                 setStatusMessage('パスキーを使用してログイン');
@@ -40,24 +68,18 @@ export const PasskeyButton: React.FC = () => {
             <Button
                 onClick={handlePasskeyLogin}
                 variant="secondary"
-                className="w-full bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors"
-                disabled={isLoading}
+                className="w-full text-gray-600"
+                disabled={status === 'loading'}
             >
                 パスキーでログイン
             </Button>
 
             <PasskeyDialog
                 isOpen={isDialogOpen}
-                onClose={() => {
-                    if (status !== 'loading') {
-                        setIsDialogOpen(false);
-                        setStatus('idle');
-                        setStatusMessage('パスキーを使用してログイン');
-                    }
-                }}
+                onClose={() => status !== 'loading' && setIsDialogOpen(false)}
                 status={status}
                 statusMessage={statusMessage}
             />
         </>
     );
-};
+}
