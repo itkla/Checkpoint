@@ -26,6 +26,7 @@ export function LoginForm() {
 
         try {
             const response = await api.auth.login(credentials);
+            console.log(response);
             localStorage.setItem('token', response.token);
             router.push('/dashboard');
         } catch (error: any) {
@@ -52,7 +53,7 @@ export function LoginForm() {
                 <Input
                     type="email"
                     placeholder=""
-                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-lg"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
@@ -84,7 +85,7 @@ export function LoginForm() {
                     required
                 />
             </div>
-            <Button type="submit" className="w-full" disabled={isLoading}>
+            <Button type="submit" className="w-full bg-blue-500 hover:bg-blue-600" disabled={isLoading}>
                 {isLoading ? 'ログイン中...' : 'ログイン'}
             </Button>
             <PasskeyButton email={email} />

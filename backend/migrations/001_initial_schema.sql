@@ -6,6 +6,13 @@ DROP TABLE IF EXISTS user_sso_connections;
 DROP TABLE IF EXISTS sso_providers;
 DROP TABLE IF EXISTS auth_methods;
 DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS user_settings;
+DROP TABLE IF EXISTS user_roles;
+DROP TABLE IF EXISTS roles;
+DROP TABLE IF EXISTS audit_logs;
+DROP TABLE IF EXISTS password_resets;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS email_verifications;
 
 -- Create users table
 CREATE TABLE users (

@@ -1,6 +1,11 @@
 import { randomBytes, createCipheriv, createDecipheriv } from 'crypto';
+import { config } from 'dotenv';
 
-const PGP_ENCRYPTION_KEY = process.env.PGP_ENCRYPTION_KEY;
+const PGP_ENCRYPTION_KEY = config().parsed?.PGP_ENCRYPTION_KEY;
+if (!PGP_ENCRYPTION_KEY) {
+    throw new Error('PGP_ENCRYPTION_KEY is not set in the environment variables.');
+    process.exit(1);
+}
 const PGP_ENCRYPTION_ALGORITHM = 'aes-256-gcm';
 const PGP_ENCRYPTION_IV_LENGTH = 12;
 
@@ -12,7 +17,7 @@ export interface EncryptedPayload {
 
 export function encryptPrivateKey(plainText: string): EncryptedPayload {
     if (!PGP_ENCRYPTION_KEY || PGP_ENCRYPTION_KEY.length !== 64) {
-        throw new Error('Invalid PGP_KEY_ENCRYPTION_KEY: must be a 64-hex-character string (32 bytes).');
+        throw new Error('Invalid PGP_KEY_ENCRYPTION_KEY: must be a 64-hex-character string (32 bytes). Length: ' + PGP_ENCRYPTION_KEY?.length);
     }
 
     const iv = randomBytes(PGP_ENCRYPTION_IV_LENGTH);

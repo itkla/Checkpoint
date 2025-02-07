@@ -188,9 +188,11 @@ server.register(fastifySecureSession, {
 server.register(passport.initialize());
 server.register(jwt, {
     secret: process.env.JWT_SECRET!,
-    // decorateRequest: true,
+    sign: {
+        expiresIn: '60d'
+    },
     namespace: 'jwtUser',
-    decoratorName: 'jwtUSer'
+    decoratorName: 'jwtUser'
 });
 server.register(passport.secureSession());
 
@@ -279,7 +281,7 @@ if (process.env.LINE_CHANNEL_ID && process.env.LINE_CHANNEL_SECRET) {
 
 // Schema definitions
 const UserSchema = z.object({
-    id: z.string(),
+    id: z.string().optional(),
     email: z.string().email(),
     password: z.string().min(8),
     first_name: z.string().optional(),
@@ -449,8 +451,8 @@ server.post('/api/auth/register', async (request, reply) => {
             const hashedPassword = await argon2.hash(body.password);
             // use auth_methods table to store hashed password if set
             await pool.query(
-                'INSERT INTO auth_methods (user_id, type, hashed_password) VALUES ($1, $2, $3)',
-                [result.rows[0].id, 'password', hashedPassword]
+                'INSERT INTO auth_methods (user_id, type, metadata) VALUES ($1, $2, $3)',
+                [result.rows[0].id, 'password', JSON.stringify(hashedPassword)]
             );
         }
 
@@ -566,7 +568,6 @@ server.post<{ Body: { email: string, response: any } }>('/api/auth/passkey/login
             // Sign and return a JWT token
             const token = server.jwt.sign(
                 { userId: user.id, isAdmin },
-                { expiresIn: '60d' }
             );
             await redis.set(`session:${token}`, String(user.id), {
                 EX: 60 * 60 * 24 * 60 // 60 days;
