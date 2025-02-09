@@ -7,6 +7,7 @@ import type {
     PasskeyCredential,
     UserAuthMethod
 } from '@/app/types/user';
+import { register } from 'module';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
@@ -70,6 +71,53 @@ export const authApi = {
         );
         return response.data;
     },
+
+    register: async (data: Partial<User>) => {
+        const response = await apiClient.post<AuthResponse>('/api/auth/register', data);
+        return response.data;
+    },
+
+    forgotPassword: async (email: string) => {
+        const response = await apiClient.post<{ success: boolean }>('/api/auth/password-reset', {
+            email,
+        });
+        return response.data;
+    },
+
+    verifyEmail: async (token: string) => {
+        const response = await apiClient.post('/api/auth/verify-email', { token });
+        return response.data;
+    },
+
+    resendVerification: async (email: string) => {
+        const response = await apiClient.post('/api/auth/resend-verification', { email });
+        return response.data;
+    },
+
+    verify2FA: async (code: string) => {
+        const response = await apiClient.post('/api/auth/verify-2fa', { code });
+        return response.data;
+    },
+
+    generateRecoveryCodes: async () => {
+        const response = await apiClient.post('/api/auth/recovery-codes');
+        return response.data;
+    },
+
+    useRecoveryCode: async (code: string) => {
+        const response = await apiClient.post('/api/auth/use-recovery-code', { code });
+        return response.data;
+    },
+
+    initiate2FA: async () => {
+        const response = await apiClient.post('/api/auth/2fa/setup');
+        return response.data;
+    },
+
+    disable2FA: async (code: string) => {
+        const response = await apiClient.post('/api/auth/2fa/disable', { code });
+        return response.data;
+    },
 };
 
 export const userApi = {
@@ -100,6 +148,13 @@ export const userApi = {
     getUserAuthMethods: async (id: string) => {
         const response = await apiClient.get<UserAuthMethod[]>(
             `/api/users/${id}/auth-methods`
+        );
+        return response.data;
+    },
+
+    userExists: async (email: string) => {
+        const response = await apiClient.get<{ exists: boolean }>(
+            `/api/users/exists?email=${email}`
         );
         return response.data;
     },

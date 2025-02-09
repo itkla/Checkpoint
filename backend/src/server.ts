@@ -1063,6 +1063,14 @@ server.get('/auth/sso/line/callback', {
 Handles all user-related routes
 */
 
+server.get('/api/users/exists', {
+    handler: async (request, reply) => {
+        const { email } = request.query as { email: string };
+        const result = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+        return { exists: result.rowCount > 0 };
+    },
+});
+
 // get all users
 server.get('/api/users', {
     onRequest: [server.authenticate],

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { api } from '@/lib/api-client';
 import type { LoginCredentials } from '@/app/types/user';
@@ -28,13 +28,37 @@ export function LoginForm() {
             const response = await api.auth.login(credentials);
             console.log(response);
             localStorage.setItem('token', response.token);
-            router.push('/dashboard');
+
+            // get previous path from query params
+            const searchParams = useSearchParams();
+            const nextPath = searchParams.get('next');
+            if (nextPath) {
+                router.push(nextPath);
+                return;
+            } else {
+                router.push('/dashboard');
+            }
         } catch (error: any) {
-            toast({
-                title: "エラー",
-                description: error.response?.data?.error || "ログインに失敗しました",
-                variant: "destructive",
-            });
+            if (error.response?.status === 400) {
+                toast({
+                    title: "入力エラー",
+                    description: "メールアドレスとパスワードを確認してください",
+                    variant: "destructive",
+                });
+            } else if (error.response?.status === 401) {
+                toast({
+                    title: "認証エラー",
+                    description: "メールアドレスまたはパスワードが正しくありません",
+                    variant: "destructive",
+                });
+            } else {
+                toast({
+                    title: "エラー",
+                    description: error.response?.data?.error || "ログインに失敗しました",
+                    variant: "destructive",
+                });
+            }
+            console.error('Login error:', error.response?.data);
         } finally {
             setIsLoading(false);
         }
@@ -85,7 +109,7 @@ export function LoginForm() {
                     required
                 />
             </div>
-            <Button type="submit" className="w-full bg-blue-500 hover:bg-blue-600" disabled={isLoading}>
+            <Button type="submit" className="w-full bg-blue-500 hover:bg-blue-600 py-6 text-lg" disabled={isLoading}>
                 {isLoading ? 'ログイン中...' : 'ログイン'}
             </Button>
             <PasskeyButton email={email} />
