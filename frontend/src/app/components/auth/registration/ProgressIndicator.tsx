@@ -9,7 +9,7 @@ interface ProgressIndicatorProps {
 
 export function ProgressIndicator({ steps, currentStep }: ProgressIndicatorProps) {
     return (
-        <div className="mb-8">
+        <div className="mb-16">
             <div className="flex justify-between">
                 {steps.map((step, index) => (
                     <div key={step.key} className="relative flex flex-col items-center">

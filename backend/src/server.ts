@@ -1,7 +1,7 @@
 // src/server.ts
 import fastify from 'fastify';
 import cors from '@fastify/cors';
-import jwt, { JWT } from '@fastify/jwt';
+// import jwt, { JWT } from '@fastify/jwt';
 import cookie from '@fastify/cookie';
 import { Pool } from 'pg';
 // import bcrypt from 'bcrypt';
@@ -13,23 +13,12 @@ import path from 'path';
 import * as openpgp from 'openpgp';
 import { createClient } from 'redis';
 
-const redis = createClient({
-    // url: `redis://:${process.env.REDIS_PASSWORD}@${process.env.REDIS_HOST}:${process.env.REDIS_PORT}`,
-});
-redis.connect()
-    .then(() => console.log('Connected to Redis'))
-    .catch((err) => {
-        console.error('An error occurred connecting to Redis:', err);
-        process.exit(1);
-    });
-
-
-import type {
-    GenerateRegistrationOptionsOpts,
-    VerifyRegistrationResponseOpts,
-    GenerateAuthenticationOptionsOpts,
-    VerifyAuthenticationResponseOpts,
-} from '@simplewebauthn/server';
+// import type {
+//     GenerateRegistrationOptionsOpts,
+//     VerifyRegistrationResponseOpts,
+//     GenerateAuthenticationOptionsOpts,
+//     VerifyAuthenticationResponseOpts,
+// } from '@simplewebauthn/server';
 import {
     generateRegistrationOptions,
     generateAuthenticationOptions,
@@ -78,7 +67,7 @@ declare module 'fastify' {
         };
     }
     interface FastifyInstance {
-        jwt: JWT;
+        jwtUser: import('@fastify/jwt').JWT;
         authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
     }
 }
@@ -111,6 +100,16 @@ const pool = new Pool({
     port: Number(process.env.DB_PORT),
     database: process.env.DB_NAME,
 });
+
+const redis = createClient({
+    // url: `redis://:${process.env.REDIS_PASSWORD}@${process.env.REDIS_HOST}:${process.env.REDIS_PORT}`,
+});
+redis.connect()
+    .then(() => console.log('Connected to Redis'))
+    .catch((err) => {
+        console.error('An error occurred connecting to Redis:', err);
+        process.exit(1);
+    });
 
 const server = fastify({ logger: true });
 
@@ -174,27 +173,41 @@ const rpID = process.env.DOMAIN || 'localhost';
 const origin = process.env.FRONTEND_URL || `https://${rpID}`;
 
 // Register plugins
-server.register(cors, {
-    origin: process.env.FRONTEND_URL,
-    credentials: true
-});
+try {
+    server.register(cors, {
+        origin: process.env.FRONTEND_URL,
+        credentials: true
+    });
+    
+    server.register(fastifySecureSession, {
+        key: process.env.SESSION_KEY || '85P5B+/sXn6zwnXP6O8/u6abFWb8M5aOXfrpJruhm1M=',
+        cookie: {
+            secure: process.env.NODE_ENV === 'production'
+        }
+    });
 
-server.register(fastifySecureSession, {
-    key: process.env.SESSION_KEY || '85P5B+/sXn6zwnXP6O8/u6abFWb8M5aOXfrpJruhm1M=',
-    cookie: {
-        secure: process.env.NODE_ENV === 'production'
-    }
+    server.register(passport.initialize());
+    server.register(passport.secureSession());
+    server.register(import('@fastify/jwt'), {
+        secret: process.env.JWT_SECRET!,
+        sign: {
+            expiresIn: '60d'
+        },
+        namespace: 'jwtUser',
+        decoratorName: 'jwtUser'
+    });
+    console.log('Registered plugins');
+} catch (err) {
+    console.error('Error registering plugins:', err);
+    process.exit(1);
+}
+
+
+server.after(() => {
+    console.log('Server started');
+    console.log('has jwtUser? ' + server.hasDecorator('jwtUser'));
+    console.log('fasitfy.jwtUser = ' + server.jwtUser);
 });
-server.register(passport.initialize());
-server.register(jwt, {
-    secret: process.env.JWT_SECRET!,
-    sign: {
-        expiresIn: '60d'
-    },
-    namespace: 'jwtUser',
-    decoratorName: 'jwtUser'
-});
-server.register(passport.secureSession());
 
 // Configure SSO providers
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
@@ -456,7 +469,7 @@ server.post('/api/auth/register', async (request, reply) => {
             );
         }
 
-        const token = server.jwt.sign(
+        const token = server.jwtUser.sign(
             { userId: result.rows[0].id },
             { expiresIn: '60d' }
         );
@@ -566,7 +579,7 @@ server.post<{ Body: { email: string, response: any } }>('/api/auth/passkey/login
             const isAdmin = roles.includes('admin');
         
             // Sign and return a JWT token
-            const token = server.jwt.sign(
+            const token = server.jwtUser.sign(
                 { userId: user.id, isAdmin },
             );
             await redis.set(`session:${token}`, String(user.id), {
@@ -668,12 +681,13 @@ server.post('/api/auth/login', async (request, reply) => {
     }
 
     const authResult = await pool.query(
-        'SELECT hashed_password FROM auth_methods WHERE user_id = $1 AND type = $2',
+        'SELECT metadata FROM auth_methods WHERE user_id = $1 AND type = $2',
         [user.id, 'password']
     );
     const authMethod = authResult.rows[0];
+    // console.log(authMethod);
 
-    if (!authMethod || !(await argon2.verify(authMethod.hashed_password, password))) {
+    if (!authMethod || !(await argon2.verify(authMethod.metadata, password))) {
         reply.code(401).send({ error: 'Invalid credentials' });
         return;
     }
@@ -687,10 +701,12 @@ server.post('/api/auth/login', async (request, reply) => {
     );
     const roles = rolesRes.rows.map(row => row.name);
     const isAdmin = roles.includes('admin');
+    // console.log(roles, isAdmin, user.id);
 
     // Sign and return a JWT token
-    const token = server.jwt.sign(
-        { userId: user.id, isAdmin },
+    console.log('server.jwtUser:' + server.jwtUser);
+    const token = server.jwtUser.sign(
+        { userId: user.id },
         { expiresIn: '60d' }
     );
     await redis.set(`session:${token}`, String(user.id), {
@@ -706,7 +722,7 @@ server.post('/api/auth/login', async (request, reply) => {
         })
         .send({ user: { id: user.id, email: user.email }, token });
 
-    // const token = server.jwt.sign({ userId: user.id });
+    // const token = server.jwtUser.sign({ userId: user.id });
     // return { user: { id: user.id, email: user.email, name: user.name }, token };
 });
 
@@ -993,7 +1009,7 @@ server.get('/auth/sso/google/callback', {
         const isAdmin = roles.includes('admin');
     
         // Sign and return a JWT token
-        const token = server.jwt.sign(
+        const token = server.jwtUser.sign(
             { userId: user.id, isAdmin },
             { expiresIn: '60d' }
         );
@@ -1038,7 +1054,7 @@ server.get('/auth/sso/line/callback', {
         const isAdmin = roles.includes('admin');
     
         // Sign and return a JWT token
-        const token = server.jwt.sign(
+        const token = server.jwtUser.sign(
             { userId: user.id, isAdmin },
             { expiresIn: '60d' }
         );
