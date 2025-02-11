@@ -37,6 +37,15 @@ export const userProfileSchema = z.object({
     lastName: z.string().min(1, "姓は必須です").max(50, "姓が長すぎます"),
     phone: z.string().regex(phonePattern, "有効な電話番号を入力してください").optional(),
     department: z.string().max(100, "部署名が長すぎます").optional(),
+    profile_pic: z.string().optional(),
+    address: z.object({
+        street: z.string().optional(),
+        street2: z.string().optional(),
+        city: z.string().optional(),
+        state: z.string().optional(),
+        zip: z.string().optional(),
+        country: z.string().optional(),
+    }).optional()
 });
 
 // Combined registration schema
@@ -123,4 +132,18 @@ export interface ApiError {
 export interface ValidationError {
     field: string;
     message: string;
+}
+
+export interface LoginCredentials {
+    email: string;
+    password: string;
+}
+
+export interface AuthResponse {
+    user: {
+        id: string;
+        email: string;
+    };
+    token: string;
+    requiresVerification?: boolean;
 }

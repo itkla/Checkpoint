@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { startAuthentication } from '@simplewebauthn/browser';
 import { Button } from '@/components/ui/button';
 import { PasskeyDialog } from './PasskeyDialog';
-import { authApi } from '@/lib/api-client';
 import { useToast } from '@/hooks/use-toast';
+import { loginWithPasskey } from '@/lib/webauthn';
 
 interface PasskeyButtonProps {
     email: string;
@@ -32,29 +31,27 @@ export function PasskeyButton({ email }: PasskeyButtonProps) {
         setStatusMessage('パスキーを準備中...');
 
         try {
-            const options = await authApi.initiatePasskey(email);
             setStatusMessage('パスキーを使用して認証してください');
+            const result = await loginWithPasskey(email);
 
-            const credential = await startAuthentication(options);
-            setStatusMessage('認証を確認中...');
-
-            const response = await authApi.completePasskey(email, credential);
-
-            if (response.token) {
+            if (result.success && result.token) {
+                localStorage.setItem('token', result.token);
                 setStatus('success');
                 setStatusMessage('認証成功！');
-                localStorage.setItem('token', response.token);
 
                 setTimeout(() => {
                     router.push('/dashboard');
                 }, 1500);
-            } else {
-                throw new Error('認証に失敗しました');
             }
-        } catch (err) {
-            console.error('Passkey authentication error:', err);
+        } catch (error: any) {
             setStatus('error');
-            setStatusMessage(err instanceof Error ? err.message : '認証に失敗しました');
+            setStatusMessage('認証に失敗しました');
+
+            toast({
+                title: "エラー",
+                description: error.message || "パスキー認証に失敗しました",
+                variant: "destructive",
+            });
 
             setTimeout(() => {
                 setStatus('idle');

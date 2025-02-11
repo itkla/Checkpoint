@@ -13,11 +13,16 @@ export interface User {
     joined_date?: string;
     last_login?: string;
     permissions?: string[];
+    password_changed_at?: string;
 }
 
 export interface AuthResponse {
-    user: User;
+    user: {
+        id: string;
+        email: string;
+    };
     token: string;
+    requiresVerification?: boolean;
 }
 
 export interface LoginCredentials {
@@ -45,4 +50,51 @@ export interface UserAuthMethod {
     metadata?: Record<string, any>;
     created_at: string;
     last_used_at?: string;
+}
+
+export interface UserProfile {
+    id: string;
+    user_id: string;
+    first_name: string;
+    last_name: string;
+    phone: string;
+    department: string;
+    profile_pic: string;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface UserActivityLog {
+    id: string;
+    type: 'login' | 'password_change' | 'profile_update' | 'security_event';
+    description: string;
+    timestamp: string;
+    metadata?: Record<string, any>;
+}
+
+export interface UserPasswordReset {
+    email: string;
+    token: string;
+    expires_at: string;
+}
+
+export interface UserVerification {
+    email: string;
+    token: string;
+    expires_at: string;
+}
+
+export interface UserRegistration {
+    email: string;
+    token: string;
+    expires_at: string;
+}
+
+export interface UserSession {
+    id: string;
+    user_id: string;
+    user_agent: string;
+    ip_address: string;
+    last_used_at: string;
+    created_at: string;
 }

@@ -5,7 +5,8 @@ import type {
     AuthResponse,
     LoginCredentials,
     PasskeyCredential,
-    UserAuthMethod
+    UserAuthMethod,
+    UserSession,
 } from '@/app/types/user';
 import { register } from 'module';
 
@@ -28,8 +29,11 @@ apiClient.interceptors.response.use(
     (response) => response,
     (error) => {
         if (error.response?.status === 401) {
-            localStorage.removeItem('token');
-            window.location.href = '/login';
+            // Only force a redirect if we're not already on the login page
+            if (window.location.pathname !== '/login') {
+                localStorage.removeItem('token');
+                window.location.href = '/login';
+            }
         }
         return Promise.reject(error);
     }
@@ -37,7 +41,16 @@ apiClient.interceptors.response.use(
 
 export const authApi = {
     login: async (credentials: LoginCredentials) => {
+        console.log('Sending credentials:', credentials); // Debug log
         const response = await apiClient.post<AuthResponse>('/api/auth/login', credentials);
+        return response.data;
+    },
+
+    getPasskey: async (email: string) => {
+        const response = await apiClient.post<PublicKeyCredentialRequestOptions>(
+            '/api/auth/passkey/login/start',
+            { email }
+        );
         return response.data;
     },
 
@@ -118,6 +131,45 @@ export const authApi = {
         const response = await apiClient.post('/api/auth/2fa/disable', { code });
         return response.data;
     },
+
+    getSessions: async () => {
+        const response = await apiClient.get<{ sessions: UserSession[] }>('/api/auth/sessions');
+        return response.data.sessions;
+    },
+
+    revokeSession: async (sessionId: string) => {
+        const response = await apiClient.delete(`/api/auth/sessions/${sessionId}`);
+        return response.data;
+    },
+
+    revokeAllSessions: async () => {
+        const response = await apiClient.delete('/api/auth/sessions');
+        return response.data;
+    },
+
+    getPasskeys: async () => {
+        const response = await apiClient.get('/api/auth/passkey');
+        return response.data;
+    },
+
+    deletePasskey: async (credentialId: string) => {
+        const response = await apiClient.delete(`/api/auth/passkey/${credentialId}`);
+        return response.data;
+    },
+
+    // SSO methods
+    initiateGoogleLogin: () => {
+        window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/api/auth/sso/google`;
+    },
+
+    initiateLineLogin: () => {
+        window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/api/auth/sso/line`;
+    },
+
+    changePassword: async (data: { oldPassword: string; newPassword: string }) => {
+        const response = await apiClient.put('/api/auth/change-password', data);
+        return response.data;
+    }
 };
 
 export const userApi = {
@@ -158,6 +210,15 @@ export const userApi = {
         );
         return response.data;
     },
+
+    uploadProfilePicture: async (file: File, id: string) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        const response = await apiClient.post<{ url: string }>(`/api/users/${id}/profile-pic`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        return response.data;
+    }
 };
 
 // Export a unified API object

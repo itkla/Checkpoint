@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence } from 'framer-motion';
 import { ProgressIndicator } from './registration/ProgressIndicator';
 import { EmailStep } from './registration/EmailStep';
 import { MethodStep } from './registration/MethodStep';
 import { ProfileStep } from './registration/ProfileStep';
-import { DetailsStep } from './registration/DetailStep';
+import { DetailStep } from './registration/DetailStep';
 import { ConfirmStep } from './registration/ConfirmStep';
 import { registrationSteps, type AuthState, type RegistrationStep } from '@/app/types/auth';
 import { useToast } from '@/hooks/use-toast';
@@ -15,6 +15,19 @@ export function RegistrationForm() {
     const [registrationData, setRegistrationData] = useState<AuthState>({
         email: '',
         authMethod: 'password',
+        profile: {
+            firstName: '',
+            lastName: '',
+            phone: '',
+            department: '',
+            address: {
+                street: '',
+                city: '',
+                state: '',
+                zip: '',
+                country: '',
+            }
+        },
     });
     const router = useRouter();
     const { toast } = useToast();
@@ -37,6 +50,31 @@ export function RegistrationForm() {
             setStep(registrationSteps[currentIndex - 1].key);
         }
     };
+
+    useEffect(() => {
+        async function checkPhone() {
+            if (registrationData.phone) {
+                try {
+                    const existsResponse = await api.users.userExists(registrationData.phone);
+                    if (existsResponse.exists) {
+                        // Delay the toast call so it doesn’t occur during render.
+                        setTimeout(() => {
+                            toast({
+                                title: "電話番号が既に存在します",
+                                description: "別の電話番号を入力してください",
+                                variant: "destructive",
+                            });
+                        }, 0);
+                        // Optionally, update state to prevent proceeding.
+                        setRegistrationData(prev => ({ ...prev, phoneError: true }));
+                    }
+                } catch (error) {
+                    // Handle error
+                }
+            }
+        }
+        checkPhone();
+    }, [registrationData.phone]);
 
     const renderStep = () => {
         switch (step) {
@@ -63,6 +101,7 @@ export function RegistrationForm() {
             case 'profile':
                 return (
                     <ProfileStep
+                        initialProfile={registrationData.profile}
                         onNext={(profile) => {
                             updateRegistrationData({ profile });
                             nextStep();
@@ -72,7 +111,7 @@ export function RegistrationForm() {
                 );
             case 'details':
                 return (
-                    <DetailsStep
+                    <DetailStep
                         authMethod={registrationData.authMethod}
                         onNext={(details) => {
                             updateRegistrationData(details);

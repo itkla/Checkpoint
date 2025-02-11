@@ -11,7 +11,7 @@ import {
 } from '@heroicons/react/24/outline';
 
 interface ConfirmStepProps {
-    registrationData: AuthState;
+    registrationData: AuthState & { profilePicture?: File; preview?: string };
     onBack: () => void;
     onComplete: () => void;
 }
@@ -26,11 +26,18 @@ export function ConfirmStep({
     const { toast } = useToast();
     const router = useRouter();
 
+    // Function to upload the profile picture using FormData.
+    async function uploadProfilePicture(userId: string, file: File) {
+        // Pass the File object directly to the API method
+        const response = await api.users.uploadProfilePicture(file, userId);
+        return response;
+    }
+
     const handleSubmit = async () => {
         setIsSubmitting(true);
         try {
+            // Registration API call
             const response = await api.auth.register(registrationData);
-
             if (response.requiresVerification) {
                 setRequiresVerification(true);
                 toast({
@@ -39,6 +46,21 @@ export function ConfirmStep({
                 });
             } else {
                 localStorage.setItem('token', response.token);
+
+                // If there is a profile picture, upload it
+                if (registrationData.profilePicture) {
+                    try {
+                        await uploadProfilePicture(response.user.id, registrationData.profilePicture);
+                    } catch (uploadError) {
+                        toast({
+                            title: "画像アップロードエラー",
+                            description: "プロフィール画像のアップロードに失敗しました",
+                            variant: "destructive",
+                        });
+                        console.error("Profile picture upload failed", uploadError);
+                    }
+                }
+
                 onComplete();
                 router.push('/dashboard');
             }
@@ -52,6 +74,23 @@ export function ConfirmStep({
             setIsSubmitting(false);
         }
     };
+
+    if (requiresVerification) {
+        return (
+            <StepLayout title="メール確認" description="確認メールをお送りしました" showBack={false}>
+                <div className="text-center space-y-4">
+                    <ExclamationTriangleIcon className="mx-auto h-12 w-12 text-yellow-500" />
+                    <p className="text-gray-600">
+                        {registrationData.email} に確認メールをお送りしました。
+                        メールに記載されたリンクをクリックして、登録を完了してください。
+                    </p>
+                    <Button variant="outline" onClick={() => router.push('/login')}>
+                        ログイン画面へ
+                    </Button>
+                </div>
+            </StepLayout>
+        );
+    }
 
     if (requiresVerification) {
         return (
@@ -78,11 +117,7 @@ export function ConfirmStep({
     }
 
     return (
-        <StepLayout
-            title="登録内容の確認"
-            description="入力内容を確認してください"
-            onBack={onBack}
-        >
+        <StepLayout title="登録内容の確認" description="入力内容を確認してください" onBack={onBack}>
             <div className="space-y-6">
                 <div className="bg-gray-50 rounded-lg p-6 space-y-4">
                     <div className="grid grid-cols-2 gap-4">
@@ -115,17 +150,23 @@ export function ConfirmStep({
                             </>
                         )}
                     </div>
+                    {registrationData.preview && (
+                        <div>
+                            <h3 className="text-sm font-medium text-gray-500">プロフィール画像</h3>
+                            <img
+                                src={registrationData.preview}
+                                alt="Profile Preview"
+                                className="mt-2 h-24 w-24 object-cover rounded-full border"
+                            />
+                        </div>
+                    )}
                 </div>
 
                 <div className="flex justify-between">
                     <Button variant="ghost" onClick={onBack} disabled={isSubmitting}>
                         戻る
                     </Button>
-                    <Button
-                        onClick={handleSubmit}
-                        disabled={isSubmitting}
-                        className="min-w-[120px]"
-                    >
+                    <Button onClick={handleSubmit} disabled={isSubmitting} className="min-w-[120px]">
                         {isSubmitting ? '登録中...' : '登録'}
                     </Button>
                 </div>

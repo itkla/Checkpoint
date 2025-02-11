@@ -17,7 +17,7 @@ interface DetailsStepProps {
     onBack: () => void;
 }
 
-export function DetailsStep({ authMethod, onNext, onBack }: DetailsStepProps) {
+export function DetailStep({ authMethod, onNext, onBack }: DetailsStepProps) {
     const [isProcessing, setIsProcessing] = useState(false);
     const { toast } = useToast();
     const form = useForm({
@@ -27,6 +27,14 @@ export function DetailsStep({ authMethod, onNext, onBack }: DetailsStepProps) {
             confirmPassword: '',
         },
     });
+
+    if (form.formState.errors.password) {
+        toast({
+            title: "エラー",
+            description: "パスワードが無効です: " + form.formState.errors.password.message,
+            variant: "destructive",
+        });
+    }
 
     const handlePasskeyRegistration = async () => {
         setIsProcessing(true);

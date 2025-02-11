@@ -6,7 +6,7 @@ import SocialLogin from '@/app/components/SocialLogin';
 
 export default function LoginPage() {
     return (
-      <div className="container flex justify-center items-center min-h-screen bg-gray-100 w-full">
+      <div className="flex justify-center items-center min-h-screen bg-gray-100">
         <div className="bg-white drop-shadow-lg w-full max-w-md p-8 py-10 rounded-2xl">
           <img
             src="/logo.svg"

@@ -1,23 +1,23 @@
 // components/users/UserTable.tsx
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { api } from '@/lib/api-client';
 import type { User } from '@/app/types/user';
-import { 
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
 } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { EllipsisVerticalIcon } from '@heroicons/react/24/solid';
 import { useToast } from '@/hooks/use-toast';
@@ -25,7 +25,7 @@ import { UserDetailDialog } from './UserDetailDialog';
 
 interface TableProps {
     onUserSelect?: (user: User) => void;
-  }
+}
 
 export default function UserTable() {
     const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
@@ -33,29 +33,30 @@ export default function UserTable() {
     const [showDetails, setShowDetails] = useState(false);
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
     const { toast } = useToast();
-    const queryClient = useQueryClient();
+    const queryClient = new QueryClient();
 
     // Fetch users
     const { data: users = [], isLoading, error } = useQuery({
         queryKey: ['users'],
         queryFn: () => api.users.getUsers(),
-      });
+    });
 
     // Delete mutation
     const deleteMutation = useMutation({
         mutationFn: (userId: string) => api.users.deleteUser(userId),
         onSuccess: () => {
-          queryClient.invalidateQueries({ queryKey: ['users'] });
-          toast({ title: "成功", description: "ユーザーを削除しました" });
+            // queryClient is now available from context
+            queryClient.invalidateQueries({ queryKey: ['users'] });
+            toast({ title: "成功", description: "ユーザーを削除しました" });
         },
         onError: () => {
-          toast({
-            title: "エラー",
-            description: "ユーザーの削除に失敗しました",
-            variant: "destructive"
-          });
+            toast({
+                title: "エラー",
+                description: "ユーザーの削除に失敗しました",
+                variant: "destructive"
+            });
         },
-      });
+    });
 
     // Update mutation
     const updateMutation = useMutation({

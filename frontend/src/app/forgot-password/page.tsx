@@ -10,6 +10,9 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { EnvelopeIcon } from '@heroicons/react/24/outline';
 import { api } from '@/lib/api-client';
+import Link from 'next/link';
+import { ArrowLeftIcon } from '@heroicons/react/24/solid';
+import { Arrow } from '@radix-ui/react-select';
 
 export default function PasswordResetPage() {
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -37,7 +40,7 @@ export default function PasswordResetPage() {
 
   if (isSubmitted) {
     return (
-      <div className="container flex justify-center items-center min-h-screen">
+      <div className="flex justify-center items-center min-h-screen bg-gray-100">
         <div className="bg-white drop-shadow-lg w-full max-w-md p-8 py-10 rounded-[5%]">
           <div className="text-center">
             <EnvelopeIcon className="mx-auto h-12 w-12 text-blue-500" />
@@ -53,7 +56,7 @@ export default function PasswordResetPage() {
   }
 
   return (
-    <div className="container flex justify-center items-center min-h-screen">
+    <div className="flex justify-center items-center min-h-screen bg-gray-100">
       <div className="bg-white drop-shadow-lg w-full max-w-md p-8 py-10 rounded-[5%]">
         <h1 className="text-2xl font-bold text-center">パスワードリセット</h1>
         <p className="mt-2 text-gray-600 text-center">
@@ -63,10 +66,10 @@ export default function PasswordResetPage() {
         <form onSubmit={form.handleSubmit(onSubmit)} className="mt-8 space-y-6">
           <div>
             <Input
-              {...form.register('email')}
+              {...form.register("email")}
               type="email"
               placeholder="メールアドレス"
-              className="w-full"
+              className={`w-full ${form.formState.errors.email ? "border-red-500" : ""}`}
             />
             {form.formState.errors.email && (
               <p className="mt-1 text-sm text-red-500">
@@ -83,7 +86,11 @@ export default function PasswordResetPage() {
             {isLoading ? '送信中...' : 'リセットリンクを送信'}
           </Button>
         </form>
+        <Link href="/login" className="block text-left text-sm mt-4 text-black hover:text-gray-800 transition-colors">
+          <ArrowLeftIcon className="h-4 w-4 inline-block mr-1" />戻る
+        </Link>
       </div>
+      
     </div>
   );
 }
