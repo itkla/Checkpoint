@@ -1,5 +1,6 @@
 // types/auth.ts
-import { z } from "zod";
+import { date, z } from "zod";
+import { isPasswordValid } from "@/lib/passwordValidation";
 
 // Basic validation patterns
 const passwordPattern = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
@@ -16,28 +17,23 @@ export const emailSchema = z.object({
 
 // Password validation schema with enhanced rules
 export const passwordSchema = z.object({
-    password: z
-        .string()
-        .min(8, "パスワードは8文字以上である必要があります")
-        .max(72, "パスワードが長すぎます")
-        .regex(/[A-Z]/, "パスワードは少なくとも1つの大文字を含む必要があります")
-        .regex(/[a-z]/, "パスワードは少なくとも1つの小文字を含む必要があります")
-        .regex(/[0-9]/, "パスワードは少なくとも1つの数字を含む必要があります")
-        .regex(/[@$!%*?&]/, "パスワードは少なくとも1つの特殊文字を含む必要があります")
-        .regex(passwordPattern, "パスワードが要件を満たしていません"),
+    password: z.string().refine(val => isPasswordValid(val), {
+        message: "パスワードは8文字以上で、大文字、小文字、数字、特殊文字を含む必要があります",
+    }),
     confirmPassword: z.string(),
-}).refine((data) => data.password === data.confirmPassword, {
+}).refine(data => data.password === data.confirmPassword, {
     message: "パスワードが一致しません",
     path: ["confirmPassword"],
 });
 
 // User profile schema
 export const userProfileSchema = z.object({
-    firstName: z.string().min(1, "名前は必須です").max(50, "名前が長すぎます"),
-    lastName: z.string().min(1, "姓は必須です").max(50, "姓が長すぎます"),
+    first_name: z.string().min(1, "名前は必須です").max(50, "名前が長すぎます"),
+    last_name: z.string().min(1, "姓は必須です").max(50, "姓が長すぎます"),
     phone: z.string().regex(phonePattern, "有効な電話番号を入力してください").optional(),
     department: z.string().max(100, "部署名が長すぎます").optional(),
     profile_pic: z.string().optional(),
+    dateOfBirth: date().optional(),
     address: z.object({
         street: z.string().optional(),
         street2: z.string().optional(),

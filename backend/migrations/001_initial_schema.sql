@@ -22,6 +22,10 @@ CREATE TABLE users (
     last_name VARCHAR(255) NULL,
     private_key TEXT NOT NULL,
     public_key TEXT NOT NULL,
+    profile_picture VARCHAR(255),
+    dateOfBirth DATE,
+    phone_number VARCHAR(20),
+    address VARCHAR(9999),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 

@@ -5,8 +5,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "concurrently \"cd backend && npm run dev\" \"cd frontend && npm run dev\"",
-    "migrate": "cd backend && npm run migrate",
-    "install": "pnpm i && concurrently \"cd backend && npm install\" \"cd frontend && npm install\""
+    "migrate": "cd backend && npm run migrate"
   },
   "keywords": [],
   "author": "",

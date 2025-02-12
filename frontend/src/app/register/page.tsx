@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 export default function RegisterPage() {
     return (
         <div className="flex justify-center items-center min-h-screen bg-gray-100">
-            <div className="bg-white drop-shadow-lg w-full max-w-md p-8 py-10 rounded-[5%]">
+            <div className="bg-white drop-shadow-lg w-full max-w-md p-8 py-10 rounded-xl pt-16">
                 <AnimatePresence mode="wait">
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}

@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import { StepLayout } from './StepLayout';
 import { api } from '@/lib/api-client';
 import { useToast } from '@/hooks/use-toast';
+import { ToastAction } from '@/components/ui/toast';
+import { Toast } from '@radix-ui/react-toast';
 
 interface EmailStepProps {
     initialEmail: string;
@@ -15,7 +17,7 @@ interface EmailStepProps {
 
 export function EmailStep({ initialEmail, onNext }: EmailStepProps) {
     const [isChecking, setIsChecking] = useState(false);
-    const { toast } = useToast();
+    const { toast, } = useToast();
     const form = useForm({
         resolver: zodResolver(emailSchema),
         defaultValues: {
@@ -33,6 +35,7 @@ export function EmailStep({ initialEmail, onNext }: EmailStepProps) {
                     title: "エラー",
                     description: "このメールアドレスは既に登録されています",
                     variant: "destructive",
+                    action: <ToastAction altText='ログイン' onClick={() => window.location.href = '/login'}>ログイン</ToastAction>,
                 });
                 return;
             }

@@ -16,8 +16,8 @@ export function RegistrationForm() {
         email: '',
         authMethod: 'password',
         profile: {
-            firstName: '',
-            lastName: '',
+            first_name: '',
+            last_name: '',
             phone: '',
             department: '',
             address: {
@@ -51,30 +51,30 @@ export function RegistrationForm() {
         }
     };
 
-    useEffect(() => {
-        async function checkPhone() {
-            if (registrationData.phone) {
-                try {
-                    const existsResponse = await api.users.userExists(registrationData.phone);
-                    if (existsResponse.exists) {
-                        // Delay the toast call so it doesn’t occur during render.
-                        setTimeout(() => {
-                            toast({
-                                title: "電話番号が既に存在します",
-                                description: "別の電話番号を入力してください",
-                                variant: "destructive",
-                            });
-                        }, 0);
-                        // Optionally, update state to prevent proceeding.
-                        setRegistrationData(prev => ({ ...prev, phoneError: true }));
-                    }
-                } catch (error) {
-                    // Handle error
-                }
-            }
-        }
-        checkPhone();
-    }, [registrationData.phone]);
+    // useEffect(() => {
+    //     async function checkPhone() {
+    //         if (registrationData.phone) {
+    //             try {
+    //                 const existsResponse = await api.users.userExists(registrationData.phone);
+    //                 if (existsResponse.exists) {
+    //                     // Delay the toast call so it doesn’t occur during render.
+    //                     setTimeout(() => {
+    //                         toast({
+    //                             title: "電話番号が既に存在します",
+    //                             description: "別の電話番号を入力してください",
+    //                             variant: "destructive",
+    //                         });
+    //                     }, 0);
+    //                     // Optionally, update state to prevent proceeding.
+    //                     setRegistrationData(prev => ({ ...prev, phoneError: true }));
+    //                 }
+    //             } catch (error) {
+    //                 // Handle error
+    //             }
+    //         }
+    //     }
+    //     checkPhone();
+    // }, [registrationData.phone]);
 
     const renderStep = () => {
         switch (step) {

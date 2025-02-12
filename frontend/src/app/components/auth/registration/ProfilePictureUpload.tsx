@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { UserIcon } from '@heroicons/react/24/solid';
+import { UserIcon, PlusIcon } from '@heroicons/react/24/solid';
 
 interface ProfilePictureUploadProps {
     preview?: string;

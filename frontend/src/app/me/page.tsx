@@ -23,6 +23,14 @@ import { DeleteAccount } from '@/app/components/account/DeleteAccount';
 import { PasskeyManager } from '@/app/components/account/PasskeyManager';
 import { SSOConnections } from '@/app/components/account/SSOConnections';
 import { SignOutButton } from '@/app/components/SignOutButton';
+import { Avatar } from '@/components/ui/avatar';
+import { 
+    LockClosedIcon,
+    UserIcon,
+    ChartBarSquareIcon,
+    PhoneIcon,
+    EnvelopeIcon,
+} from '@heroicons/react/24/outline';
 
 export default function AccountPage() {
     const [user, setUser] = useState<User | null>(null);
@@ -47,6 +55,7 @@ export default function AccountPage() {
                 const userData = await api.users.getUser(decoded.userId);
                 console.log('User data:', userData);
                 setUser(userData);
+                console.log('User:', user);
             } catch (error) {
                 toast({
                     title: "エラー",
@@ -89,7 +98,7 @@ export default function AccountPage() {
                                 <TabsTrigger value="activity">アクティビティ</TabsTrigger>
                             </TabsList>
                         </div>
-                        <div className="flex-1">
+                        <div className="flex flex-1 justify-end items-center">
                             <SignOutButton />
                         </div>
                     </div>
@@ -110,15 +119,32 @@ export default function AccountPage() {
                             <CardContent className="space-y-6">
                                 <div className="flex items-center space-x-4">
                                     <AvatarUpload
-                                        currentAvatar={user.profile_pic}
+                                        currentAvatar={user.profile?.profile_pic}
                                         userId={user.id}
-                                        onAvatarUpdate={(url) => setUser({ ...user, profile_pic: url })}
+                                        onAvatarUpdate={(url) => setUser({ ...user, profile: { ...user.profile, profile_pic: url } })}
                                     />
                                     <div>
                                         <h2 className="text-2xl font-bold">
-                                            {user.first_name} {user.last_name}
+                                            {user.profile?.first_name || ''} {user.profile?.last_name || ''}
                                         </h2>
-                                        <p className="text-gray-500">{user.email}</p>
+                                        {/* <p className="text-md text-gray-800">{user.first_name} {user.last_name}</p> */}
+                                        <p className="text-gray-700">{user.email}</p>
+                                        <p className="text-xs text-gray-500">ID: {user.id}</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center space-x-4">
+                                    <h2 className="text-xl font-bold">個人情報</h2>
+                                    <div className="flex items-left space-x-2 rounded-lg bg-gray-100 p-2 flex-col">
+                                        <p className="text-md text-gray-700">
+                                            <PhoneIcon className="inline-block mr-2 w-5 h-5 align-middle" />
+                                            {user.profile?.phone || '未設定'}
+                                        </p>
+                                        <p className="text-md text-gray-700">
+                                            <EnvelopeIcon className="inline-block mr-2 w-5 h-5 align-middle" />
+                                            {typeof user.profile?.address === 'object'
+                                                ? `${user.profile?.address.street || ''} ${user.profile?.address.city || ''}`.trim() || '未設定'
+                                                : user.profile?.address || '未設定'}
+                                        </p>
                                     </div>
                                 </div>
                             </CardContent>

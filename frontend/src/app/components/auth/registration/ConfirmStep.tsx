@@ -32,6 +32,7 @@ export function ConfirmStep({
         const response = await api.users.uploadProfilePicture(file, userId);
         return response;
     }
+    console.log(registrationData);
 
     const handleSubmit = async () => {
         setIsSubmitting(true);
@@ -62,7 +63,7 @@ export function ConfirmStep({
                 }
 
                 onComplete();
-                router.push('/dashboard');
+                router.push('/me');
             }
         } catch (error: any) {
             toast({
@@ -138,7 +139,7 @@ export function ConfirmStep({
                                 <div>
                                     <h3 className="text-sm font-medium text-gray-500">氏名</h3>
                                     <p className="mt-1">
-                                        {registrationData.profile.lastName} {registrationData.profile.firstName}
+                                        {registrationData.profile.last_name} {registrationData.profile.first_name}
                                     </p>
                                 </div>
                                 {registrationData.profile.department && (

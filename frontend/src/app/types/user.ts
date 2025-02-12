@@ -2,13 +2,24 @@
 export interface User {
     id: string;
     email: string;
-    first_name?: string;
-    last_name?: string;
-    name?: string;
+    // name?: string;
     role?: string;
     active: boolean;
-    profile_pic?: string;
-    phone?: string;
+    profile?: {
+        first_name?: string;
+        last_name?: string;
+        profile_pic?: string;
+        phone?: string;
+        dateOfBirth?: Date;
+        address?: {
+            street?: string;
+            street2?: string;
+            city?: string;
+            state?: string;
+            zip?: string;
+            country?: string;
+        }
+    }
     department?: string;
     joined_date?: string;
     last_login?: string;
@@ -62,6 +73,7 @@ export interface UserProfile {
     profile_pic: string;
     created_at: string;
     updated_at: string;
+    dateOfBirth: Date;
 }
 
 export interface UserActivityLog {

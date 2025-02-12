@@ -46,6 +46,12 @@ export const authApi = {
         return response.data;
     },
 
+    register: async (data: Partial<User>) => {
+        console.log('Sending registration data:', data); // Debug log
+        const response = await apiClient.post<AuthResponse>('/api/auth/register', data);
+        return response.data;
+    },
+
     getPasskey: async (email: string) => {
         const response = await apiClient.post<PublicKeyCredentialRequestOptions>(
             '/api/auth/passkey/login/start',
@@ -82,11 +88,6 @@ export const authApi = {
             '/api/auth/passkey/register/complete',
             credential
         );
-        return response.data;
-    },
-
-    register: async (data: Partial<User>) => {
-        const response = await apiClient.post<AuthResponse>('/api/auth/register', data);
         return response.data;
     },
 

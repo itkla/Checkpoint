@@ -28,13 +28,13 @@ export function DetailStep({ authMethod, onNext, onBack }: DetailsStepProps) {
         },
     });
 
-    if (form.formState.errors.password) {
-        toast({
-            title: "エラー",
-            description: "パスワードが無効です: " + form.formState.errors.password.message,
-            variant: "destructive",
-        });
-    }
+    // if (form.formState.errors.password) {
+    //     toast({
+    //         title: "エラー",
+    //         description: "パスワードが無効です: " + form.formState.errors.password.message,
+    //         variant: "destructive",
+    //     });
+    // }
 
     const handlePasskeyRegistration = async () => {
         setIsProcessing(true);
@@ -114,6 +114,9 @@ export function DetailStep({ authMethod, onNext, onBack }: DetailsStepProps) {
                         次へ
                     </Button>
                 </form>
+                <Button type="button" variant="ghost" onClick={onBack}>
+                    戻る
+                </Button>
             </StepLayout>
         );
     }

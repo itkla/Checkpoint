@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
-import Navbar from '@/app/components/layout/DashboardNavbar';
-import Sidebar from '@/app/components/layout/DashboardSidebar';
+import Navbar from '@/app/components/dashboard/DashboardNavbar';
+import Sidebar from '@/app/components/dashboard/DashboardSidebar';
 
 export default function DashboardLayout({
     children,

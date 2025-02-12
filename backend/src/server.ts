@@ -39,6 +39,7 @@ import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
 import { Strategy as LineStrategy } from 'passport-line';
 
 import { encryptPrivateKey, EncryptedPayload } from './utils/crypto-utils';
+import { profile } from 'console';
 
 type UserIdParam = {
     id: string;  // The 'id' param is a string (e.g. your random 20-char user ID)
@@ -300,20 +301,28 @@ if (process.env.LINE_CHANNEL_ID && process.env.LINE_CHANNEL_SECRET) {
 const UserSchema = z.object({
     id: z.string().optional(),
     email: z.string().email(),
-    password: z.string().min(8),
-    first_name: z.string().optional(),
-    last_name: z.string().optional(),
+    password: z.string().min(8).optional(),
+    profile: z.object({
+        address: z.object({
+            street: z.string().optional(),
+            street2: z.string().optional(),
+            city: z.string().optional(),
+            state: z.string().optional(),
+            zip: z.string().optional(),
+            country: z.string().optional(),
+        }).optional(),
+        department: z.string().optional(),
+        dateOfBirth: z.date().optional(),
+        first_name: z.string().optional(),
+        last_name: z.string().optional(),
+        profile_pic: z.string().optional(),
+        phone: z.string().optional(),
+    }),
     public_key: z.string().optional(),
     private_key: z.string().optional(),
-    profile_pic: z.string().optional(),
-    address: z.object({
-        street: z.string().optional(),
-        street2: z.string().optional(),
-        city: z.string().optional(),
-        state: z.string().optional(),
-        zip: z.string().optional(),
-        country: z.string().optional(),
-    }).optional()
+    authMethod: z.string().optional(),
+    confirmPassword: z.string().optional(),   
+    password_changed_at: z.date().optional(),
 });
 
 const LoginSchema = z.object({
@@ -410,19 +419,27 @@ async function auditLog(user_id: string, event: string, details: Record<string, 
 }
 
 async function getUserPermissions(userId: string): Promise<Set<string>> {
-    const rolesRes = await pool.query(
-        `SELECT r.permissions
-           FROM user_roles ur
-           JOIN roles r ON ur.role_id = r.id
-          WHERE ur.user_id = $1`,
+    const user_roles = await pool.query(
+        `SELECT role_id
+        FROM user_roles
+        WHERE user_id = $1`,
         [userId]
     );
+
+    const roles_res = await pool.query(
+        `SELECT permissions
+        FROM roles
+        WHERE id = ANY($1)`,
+        [user_roles.rows.map(row => row.role_id)]
+    );
     const allPerms = new Set<string>();
-    for (const row of rolesRes.rows) {
+    for (const row of roles_res.rows) {
         const permsArray: string[] = row.permissions?.permissions || row.permissions;
         // If row.permissions is { permissions: [...] }, adjust accordingly
         permsArray.forEach(p => allPerms.add(p));
     }
+
+    // console.log('User permissions:', allPerms);
     return allPerms;
 }
 
@@ -447,6 +464,9 @@ async function generateUUID() {
     }
     return uuid;
 }
+
+// encrypt user information (name, address, dob, etc) using private key
+
 
 // Routes
 
@@ -525,13 +545,33 @@ server.post<{ Body: LoginSchemaType }>('/api/auth/login', async (request, reply)
 });
 
 server.post('/api/auth/register', async (request, reply) => {
-    const body = UserSchema.parse(request.body);
-
+    
     try {
+        console.log('Received body data: ', request.body);
+        const userBody = request.body as any;
+        // You can parse verbosely using safeParse:
+        const parseResult = UserSchema.safeParse({
+            ...userBody,
+            profile: {
+                ...userBody.profile,
+                dateOfBirth: new Date(userBody.profile.dateOfBirth)
+            },
+        });
+        if (!parseResult.success) {
+            console.error(parseResult.error);
+            throw new Error('Invalid request data');
+        }
+        const body = parseResult.data;
 
+        // This fails because extra fields like "department" and "authMethod" 
+        // are not defined in UserSchema, and dateOfBirth is passed as a string 
+        // when z.date() expects a Date object.
+        console.log('Parsed body:', body);
+
+        // const body = UserSchema.parse(request.body);
         // generate pgp keypair for user federation
         const { publicKey, privateKey } = await openpgp.generateKey({
-            userIDs: [{ name: body.last_name, email: body.email }],
+            userIDs: [{ name: body.profile.last_name, email: body.email }],
             type: 'ecc',
             curve: 'curve25519Legacy',
             format: 'armored'
@@ -540,10 +580,28 @@ server.post('/api/auth/register', async (request, reply) => {
         const encryptedPrivateKey: EncryptedPayload = encryptPrivateKey(privateKey);
 
         const userId = await generateUUID();
-        const result = await pool.query(
-            'INSERT INTO users (id, email, public_key, private_key) VALUES ($1, $2, $3, $4) RETURNING id, email',
-            [userId, body.email, publicKey, encryptedPrivateKey]
-        );
+        const insertFields = {
+            id: userId,
+            email: body.email,
+            first_name: body.profile.first_name,
+            last_name: body.profile.last_name,
+            public_key: publicKey,
+            private_key: encryptedPrivateKey,
+            dateOfBirth: body.profile.dateOfBirth,
+            phone_number: body.profile.phone,
+            address: body.profile.address,
+        };
+
+        console.log('Inserting user:', insertFields);
+        const columns = Object.keys(insertFields);
+        const values = Object.values(insertFields);
+        const placeholders = columns.map((_, i) => `$${i + 1}`);
+        const query = `INSERT INTO users (${columns.join(
+            ', '
+        )}) VALUES (${placeholders.join(
+            ', '
+        )}) RETURNING id, email`;
+        const result = await pool.query(query, values);
 
         if (body.password) {
             // hash the password using argon2
@@ -566,8 +624,12 @@ server.post('/api/auth/register', async (request, reply) => {
         if (err.constraint === 'users_email_key') {
             reply.code(400);
             return { error: 'Email already exists' };
+        } else if (err instanceof ZodError) {
+            reply.code(400);
+            return { error: 'Invalid request', details: err.issues };
+        } else {
+            throw err;
         }
-        throw err;
     }
 });
 
@@ -1348,7 +1410,12 @@ server.get('/api/users', {
     handler: async (request, reply) => {
         try {
             // If you want to restrict this to admins, do an additional check here:
-            if (!(await hasPermission(String(request.jwtUser.userId), 'users.search')) || !request.jwtUser.isAdmin) {
+            console.log(`Received request from user ${request.jwtUser.userId} on route GET /api/users`);
+            const canSearch = await hasPermission(String(request.jwtUser.userId), 'users.search');
+            if (canSearch) {
+                console.log('User has permission to search users');
+            } else {
+                console.log('User does not have permission to search users');
                 return reply.status(403).send({ error: 'Forbidden' });
             }
 
@@ -1394,25 +1461,43 @@ server.get('/api/users/:id', {
             }
 
             const result = await pool.query(
-                'SELECT id, email, first_name, last_name, public_key, created_at FROM users WHERE id = $1',
+                'SELECT id, email, first_name, last_name, public_key, profile_picture, dateOfBirth, phone_number, address, created_at FROM users WHERE id = $1',
                 [id]
             );
+            // console.log(result.rows[0]);
+            let json_encoded_address = JSON.parse(result.rows[0].address);
+            let parsedResult = {
+                id: result.rows[0].id,
+                email: result.rows[0].email,
+                public_key: result.rows[0].public_key,
+                profile: {
+                    first_name: result.rows[0].first_name,
+                    last_name: result.rows[0].last_name,
+                    profile_picture: result.rows[0].profile_picture,
+                    dateOfBirth: result.rows[0].dateofbirth,
+                    phone: result.rows[0].phone_number,
+                    address: json_encoded_address,
+                },
+                created_at: result.rows[0].created_at ?? new Date(),
+            };
+            let outgoing_ = UserSchema.parse(parsedResult);
 
             // get date time last changed password
             const password_changed_at = await pool.query(
-                'SELECT last_used_at FROM auth_methods WHERE user_id = $1 AND type = $2',
+                'SELECT created_at FROM auth_methods WHERE user_id = $1 AND type = $2',
                 [id, 'password']
             );
 
             // store last password change date in the first row
-            result.rows[0].password_changed_at = password_changed_at.rows[0]?.last_used_at;
+            outgoing_.password_changed_at = password_changed_at.rows[0]?.created_at;
 
-            if (result.rowCount === 0) {
+            if (!outgoing_) {
                 return reply.status(404).send({ error: 'User not found' });
             }
-            reply.send(result.rows[0]);
+            reply.send(outgoing_);
         } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
+            console.log(err);
+            reply.status(500).send({ message: 'An error occurred: ' + err });
         }
     },
 });
@@ -1431,7 +1516,7 @@ server.put('/api/users/:id', {
 
             const result = await pool.query(
                 'UPDATE users SET email = $1, first_name = $2, last_name = $3 WHERE id = $4 RETURNING *',
-                [toUpdate.email, toUpdate.first_name, toUpdate.last_name, id]
+                [toUpdate.email, toUpdate.profile.first_name, toUpdate.profile.last_name, id]
             );
             if (result.rowCount === 0) {
                 return reply.status(404).send({ error: 'User not found' });

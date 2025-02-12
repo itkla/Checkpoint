@@ -2,6 +2,7 @@
 
 import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
 
 export default function DashboardError({
     error,
@@ -10,8 +11,14 @@ export default function DashboardError({
     error: Error;
     reset: () => void;
 }) {
+    const { toast } = useToast();
     useEffect(() => {
         console.error(error);
+        toast({
+            title: "エラー",
+            description: error.message || "エラーが発生しました",
+            variant: "destructive",
+        });
     }, [error]);
 
     return (

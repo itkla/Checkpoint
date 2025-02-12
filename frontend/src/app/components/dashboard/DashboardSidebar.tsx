@@ -9,6 +9,9 @@ import {
     CreditCardIcon
 } from '@heroicons/react/24/outline';
 
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { AppSidebar } from "@/components/app-sidebar";
+
 const menuItems = [
     { href: '/dashboard', icon: Squares2X2Icon, label: 'ホーム' },
     { href: '/dashboard/users', icon: UserIcon, label: 'ユーザー' },
@@ -39,5 +42,11 @@ export default function Sidebar() {
                 })}
             </nav>
         </aside>
+        // <SidebarProvider>
+        //     <AppSidebar />
+        //     <main>
+        //         <SidebarTrigger />
+        //     </main>
+        // </SidebarProvider>
     );
 }

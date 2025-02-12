@@ -49,11 +49,8 @@ export function AvatarUpload({ currentAvatar, userId, onAvatarUpdate }: AvatarUp
 
         setIsUploading(true);
         try {
-            const formData = new FormData();
-            formData.append('avatar', selectedFile);
-
-            const response = await api.users.uploadAvatar(userId, formData);
-            onAvatarUpdate(response.avatarUrl);
+            const response = await api.users.uploadProfilePicture(selectedFile, userId);
+            onAvatarUpdate(response.url);
             setIsOpen(false);
             toast({
                 title: "成功",
@@ -80,7 +77,7 @@ export function AvatarUpload({ currentAvatar, userId, onAvatarUpdate }: AvatarUp
                     onClick={() => setIsOpen(true)}
                 />
                 <div
-                    className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
                     onClick={() => setIsOpen(true)}
                 >
                     <span className="text-white bg-black bg-opacity-50 px-2 py-1 rounded text-sm">

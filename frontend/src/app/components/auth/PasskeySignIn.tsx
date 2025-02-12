@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { signInWithPasskey } from '@/lib/webauthn';
+import { loginWithPasskey } from '@/lib/webauthn';
 import { KeyIcon } from '@heroicons/react/24/outline';
 
 interface PasskeySignInProps {
@@ -26,7 +26,7 @@ export function PasskeySignIn({ email }: PasskeySignInProps) {
 
         setIsAuthenticating(true);
         try {
-            const response = await signInWithPasskey(email);
+            const response = await loginWithPasskey(email);
 
             if (response.token) {
                 localStorage.setItem('token', response.token);

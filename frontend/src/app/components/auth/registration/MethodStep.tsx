@@ -79,6 +79,9 @@ export function MethodStep({ onNext, onBack }: MethodStepProps) {
                     </Card>
                 ))}
             </div>
+            <Button type="button" variant="ghost" onClick={onBack}>
+                戻る
+            </Button>
         </StepLayout>
     );
 }

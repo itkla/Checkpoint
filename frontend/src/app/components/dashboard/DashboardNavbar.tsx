@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button';
+import { SignOutButton } from '@/app/components/SignOutButton';
 
 export default function Navbar() {
     return (
@@ -6,13 +7,10 @@ export default function Navbar() {
             {/* <div className="text-2xl font-semibold text-gray-600">[brand]</div> */}
             <img src="/logo.svg" className="w-48"></img>
             <div className="flex items-center space-x-8">
-                <span className="text-gray-600">[user]</span>
-                <Button
-                    variant="ghost"
-                    className="text-blue-500 font-medium hover:text-blue-600"
-                >
-                    ログアウト
-                </Button>
+                <span className="text-gray-600">
+                    
+                </span>
+                <SignOutButton />
             </div>
         </header>
     );

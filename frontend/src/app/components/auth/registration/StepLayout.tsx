@@ -32,13 +32,13 @@ export function StepLayout({
 
             {showBack && onBack && (
                 <div className="mt-4">
-                    <Button
+                    {/* <Button
                         variant="ghost"
                         onClick={onBack}
                         className="text-gray-600"
                     >
                         戻る
-                    </Button>
+                    </Button> */}
                 </div>
             )}
         </motion.div>
