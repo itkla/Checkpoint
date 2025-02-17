@@ -24,13 +24,15 @@ import { PasskeyManager } from '@/app/components/account/PasskeyManager';
 import { SSOConnections } from '@/app/components/account/SSOConnections';
 import { SignOutButton } from '@/app/components/SignOutButton';
 import { Avatar } from '@/components/ui/avatar';
-import { 
+import {
     LockClosedIcon,
     UserIcon,
     ChartBarSquareIcon,
     PhoneIcon,
     EnvelopeIcon,
 } from '@heroicons/react/24/outline';
+import { RoleBadge } from '@/app/components/RoleBadge';
+import { TwoFactorSetup } from '@/app/components/auth/TwoFactorSetup';
 
 export default function AccountPage() {
     const [user, setUser] = useState<User | null>(null);
@@ -41,6 +43,7 @@ export default function AccountPage() {
     const [showActivity, setShowActivity] = useState(false);
     const [showDeleteAccount, setShowDeleteAccount] = useState(false);
     const [showPasskeyManager, setShowPasskeyManager] = useState(false);
+    const [show2FASetup, setShow2FASetup] = useState(false);
     const { toast } = useToast();
 
     useEffect(() => {
@@ -116,36 +119,133 @@ export default function AccountPage() {
                                     </Button>
                                 </div>
                             </CardHeader>
-                            <CardContent className="space-y-6">
-                                <div className="flex items-center space-x-4">
+                            <CardContent className="space-y-8">
+                                {/* Profile Header */}
+                                <div className="flex items-start space-x-6">
                                     <AvatarUpload
                                         currentAvatar={user.profile?.profile_pic}
                                         userId={user.id}
                                         onAvatarUpdate={(url) => setUser({ ...user, profile: { ...user.profile, profile_pic: url } })}
                                     />
-                                    <div>
-                                        <h2 className="text-2xl font-bold">
-                                            {user.profile?.first_name || ''} {user.profile?.last_name || ''}
-                                        </h2>
-                                        {/* <p className="text-md text-gray-800">{user.first_name} {user.last_name}</p> */}
-                                        <p className="text-gray-700">{user.email}</p>
-                                        <p className="text-xs text-gray-500">ID: {user.id}</p>
+                                    <div className="flex-1">
+                                        <div className="flex items-center space-x-3">
+                                            <h2 className="text-2xl font-bold">
+                                                {user.profile?.first_name || ''} {user.profile?.last_name || ''}
+                                            </h2>
+                                            <div className="flex space-x-1">
+                                                {user.role?.split(',').map((role, index) => (
+                                                    <RoleBadge key={index} role={role.trim()} />
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <p className="text-gray-600">{user.email}</p>
+                                        <p className="text-sm text-gray-500 mt-1">ID: {user.id}</p>
                                     </div>
                                 </div>
-                                <div className="flex items-center space-x-4">
-                                    <h2 className="text-xl font-bold">個人情報</h2>
-                                    <div className="flex items-left space-x-2 rounded-lg bg-gray-100 p-2 flex-col">
-                                        <p className="text-md text-gray-700">
-                                            <PhoneIcon className="inline-block mr-2 w-5 h-5 align-middle" />
-                                            {user.profile?.phone || '未設定'}
-                                        </p>
-                                        <p className="text-md text-gray-700">
-                                            <EnvelopeIcon className="inline-block mr-2 w-5 h-5 align-middle" />
-                                            {typeof user.profile?.address === 'object'
-                                                ? `${user.profile?.address.street || ''} ${user.profile?.address.city || ''}`.trim() || '未設定'
-                                                : user.profile?.address || '未設定'}
-                                        </p>
+
+                                {/* Contact Information */}
+                                <div className="space-y-4">
+                                    <h3 className="text-lg font-semibold border-b pb-2">連絡先情報</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div>
+                                            <p className="text-sm text-gray-500">メールアドレス</p>
+                                            <p className="flex items-center mt-1">
+                                                <EnvelopeIcon className="w-5 h-5 text-gray-400 mr-2" />
+                                                {user.email}
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm text-gray-500">電話番号</p>
+                                            <p className="flex items-center mt-1">
+                                                <PhoneIcon className="w-5 h-5 text-gray-400 mr-2" />
+                                                {user.profile?.phone || '未設定'}
+                                            </p>
+                                        </div>
                                     </div>
+                                </div>
+
+                                <div className="flex flex-row justify-between">
+                                    {/* Address Information */}
+                                {user.profile?.address && (
+                                    <div className="space-y-4">
+                                        <h3 className="text-lg font-semibold border-b pb-2">住所</h3>
+                                        <div className="bg-gray-50 rounded-lg p-4">
+                                            <div className="space-y-2">
+                                                {user.profile.address.street && (
+                                                    <p className="text-gray-700">{user.profile.address.street}</p>
+                                                )}
+                                                {user.profile.address.street2 && (
+                                                    <p className="text-gray-700">{user.profile.address.street2}</p>
+                                                )}
+                                                <p className="text-gray-700">
+                                                    {[
+                                                        user.profile.address.city,
+                                                        user.profile.address.state,
+                                                        user.profile.address.zip
+                                                    ].filter(Boolean).join(', ')}
+                                                </p>
+                                                {user.profile.address.country && (
+                                                    <p className="text-gray-700">{user.profile.address.country}</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Account Information */}
+                                <div className="space-y-4">
+                                    <h3 className="text-lg font-semibold border-b pb-2">アカウント情報</h3>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div>
+                                            <p className="text-sm text-gray-500">登録日</p>
+                                            <p className="mt-1">
+                                                {user.created_at
+                                                    ? new Date(user.created_at).toLocaleDateString('ja-JP', {
+                                                        year: 'numeric',
+                                                        month: 'long',
+                                                        day: 'numeric'
+                                                    })
+                                                    : '不明'
+                                                }
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <p className="text-sm text-gray-500">最終ログイン</p>
+                                            <p className="mt-1">
+                                                {user.last_login
+                                                    ? new Date(user.last_login).toLocaleDateString('ja-JP', {
+                                                        year: 'numeric',
+                                                        month: 'long',
+                                                        day: 'numeric',
+                                                        hour: '2-digit',
+                                                        minute: '2-digit'
+                                                    })
+                                                    : '不明'
+                                                }
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                {/* Permissions */}
+                                {user.permissions && (
+                                    <div className="space-y-4">
+                                        <h3 className="text-lg font-semibold border-b pb-2">権限</h3>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            <div>
+                                                <p className="text-sm text-gray-500">権限</p>
+                                                <ul className="mt-1">
+                                                    {user.permissions.map((permission, index) => (
+                                                        <li key={index} className="flex items-center space-x-2">
+                                                            <LockClosedIcon className="w-5 h-5 text-gray-400" />
+                                                            <span>{permission}</span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                                 </div>
                             </CardContent>
                         </Card>
@@ -200,9 +300,20 @@ export default function AccountPage() {
                                                 'アカウントの安全性を高めるために2要素認証の設定をお勧めします'}
                                         </p>
                                     </div>
-                                    <Button variant="outline">
-                                        {user.two_factor_enabled ? '設定を変更' : '設定'}
+                                    <Button variant="outline" onClick={() => setShow2FASetup(true)}>
+                                        {show2FASetup ? '設定中…' : '2FA設定'}
                                     </Button>
+                                    {show2FASetup && (
+                                    <TwoFactorSetup
+                                        isOpen={show2FASetup}
+                                        onClose={() => setShow2FASetup(false)}
+                                        is2FAEnabled={!!user.two_factor_enabled}
+                                        onComplete={() => {
+                                            // Optionally update user state or show a success toast
+                                            setShow2FASetup(false);
+                                        }}
+                                    />
+                                )}
                                 </div>
 
                                 <div className="flex justify-between items-center">

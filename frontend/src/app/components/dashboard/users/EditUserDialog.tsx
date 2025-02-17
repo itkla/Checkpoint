@@ -22,7 +22,7 @@ import type { User } from "@/app/types/user";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { Toast } from "@/components/ui/toast";
-import { userSchema } from "@/app/types/user";
+// import { User } from "@/app/types/user";
 
 // export function EditUserDialog({
 //     user,

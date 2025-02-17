@@ -19,7 +19,7 @@ export default function UsersPage() {
     const [selectedUser, setSelectedUser] = useState<User | null>(null);
 
     const filteredUsers = all_users.filter(user =>
-        (user.name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (user.profile?.first_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         (user.email || '').toLowerCase().includes(searchQuery.toLowerCase())
     );
 

@@ -11,10 +11,12 @@ import { Pool } from 'pg';
 import * as argon2 from 'argon2';
 import { z, ZodError } from 'zod';
 import dotenv from 'dotenv';
-import fs from 'fs';
+import fs, { write } from 'fs';
 import path from 'path';
 import * as openpgp from 'openpgp';
 import { createClient } from 'redis';
+import { authenticator } from 'otplib';
+import QRCode from 'qrcode';
 
 // import type {
 //     GenerateRegistrationOptionsOpts,
@@ -33,6 +35,10 @@ import type {
     AuthenticationResponseJSON,
 } from '@simplewebauthn/types';
 
+import {
+    isoBase64URL,
+} from '@simplewebauthn/server/helpers';
+
 import passport, { PassportUser } from '@fastify/passport';
 import fastifySecureSession from '@fastify/secure-session';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
@@ -40,6 +46,8 @@ import { Strategy as LineStrategy } from 'passport-line';
 
 import { encryptPrivateKey, EncryptedPayload } from './utils/crypto-utils';
 import { profile } from 'console';
+import { json } from 'stream/consumers';
+import { get } from 'http';
 
 type UserIdParam = {
     id: string;  // The 'id' param is a string (e.g. your random 20-char user ID)
@@ -117,7 +125,20 @@ redis.connect()
         process.exit(1);
     });
 
-const server = fastify({ logger: true });
+const server = fastify({
+    logger: true,
+    https: {
+        key: fs.readFileSync(path.join(__dirname, '../../ssl-certs/backend/localhost+2-key.pem')),
+        cert: fs.readFileSync(path.join(__dirname, '../../ssl-certs/backend/localhost+2.pem'))
+    }
+});
+
+server.register(Multipart);
+
+server.register(cookie, {
+    secret: process.env.COOKIE_SECRET || 'supersecret',
+    parseOptions: {}
+});
 
 server.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
@@ -317,12 +338,15 @@ const UserSchema = z.object({
         last_name: z.string().optional(),
         profile_pic: z.string().optional(),
         phone: z.string().optional(),
+        profile_picture: z.string().optional(),
     }),
     public_key: z.string().optional(),
     private_key: z.string().optional(),
     authMethod: z.string().optional(),
-    confirmPassword: z.string().optional(),   
+    confirmPassword: z.string().optional(),
     password_changed_at: z.date().optional(),
+    created_at: z.date().optional(),
+    two_factor_enabled: z.boolean().optional(),
 });
 
 const LoginSchema = z.object({
@@ -418,6 +442,23 @@ async function auditLog(user_id: string, event: string, details: Record<string, 
     );
 }
 
+async function writeUserLog(
+    user_id: string,
+    event: 'success' | 'error' | 'info' | 'warning',
+    details: Record<string, any>
+) {
+    try {
+        await pool.query(
+            'INSERT INTO user_logs (user_id, event, details) VALUES ($1, $2, $3::jsonb)',
+            [user_id, event, JSON.stringify(details)]
+        );
+        return true;
+    } catch (err) {
+        console.error('Error writing user log:', err);
+        return false;
+    }
+}
+
 async function getUserPermissions(userId: string): Promise<Set<string>> {
     const user_roles = await pool.query(
         `SELECT role_id
@@ -446,6 +487,17 @@ async function getUserPermissions(userId: string): Promise<Set<string>> {
 async function hasPermission(userId: string, permission: string): Promise<boolean> {
     const allPerms = await getUserPermissions(userId);
     return allPerms.has(permission) || allPerms.has('*');
+}
+
+async function hasRole(userId: string, roleName: string): Promise<boolean> {
+    const result = await pool.query(
+        `SELECT r.name 
+    FROM roles r 
+    JOIN user_roles ur ON r.id = ur.role_id 
+    WHERE ur.user_id = $1 AND r.name = $2`,
+        [userId, roleName]
+    );
+    return result.rowCount > 0;
 }
 
 async function generateUUID() {
@@ -479,49 +531,55 @@ Handles all authentication-related routes
 server.post<{ Body: LoginSchemaType }>('/api/auth/login', async (request, reply) => {
     try {
         const validated = LoginSchema.parse(request.body);
-        const {email, password} = validated;
-    
+        const { email, password } = validated;
+
         const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
         const user = result.rows[0];
-    
+
         if (!user) {
             reply.code(401).send({ error: 'Invalid credentials' });
             return;
         }
-    
+
         const authResult = await pool.query(
             'SELECT metadata FROM auth_methods WHERE user_id = $1 AND type = $2',
             [user.id, 'password']
         );
         const authMethod = authResult.rows[0];
         // console.log(authMethod);
-    
+
         if (!authMethod || !(await argon2.verify(authMethod.metadata, password))) {
             reply.code(401).send({ error: 'Invalid credentials' });
             return;
         }
-    
-        const rolesRes = await pool.query(
-            `SELECT r.name 
-        FROM user_roles ur
-        JOIN roles r ON ur.role_id = r.id
-        WHERE ur.user_id = $1`,
-            [user.id]
-        );
-        const roles = rolesRes.rows.map(row => row.name);
-        const isAdmin = roles.includes('admin');
+
+        const isAdmin = await hasRole(user.id, 'admin');
         // console.log(roles, isAdmin, user.id);
-    
+
+        // check to see if user has 2FA enabled
+        if (user.two_factor_enabled) {
+            // Generate a temporary token with a pending2FA flag.
+            const tempToken = await signToken({ userId: user.id, pending2FA: true });
+            console.log('2FA required for user:', {userId: user.id, tempToken});
+            // Optionally, store this token in Redis if needed.
+            await redis.set(`ryftsession:${tempToken}`, String(user.id), { EX: 60 * 60 * 24 * 60 }); // 60 days
+            // Return the temporary token and a flag indicating 2FA is required.
+            return reply.send({ twoFactorRequired: true, tempToken });
+          }
+
         // Sign and return a JWT token
         // console.log('server.jwtUser:' + server.jwtUser);
         const token = await signToken(
-            { userId: user.id },
+            {
+                userId: user.id,
+                isAdmin,
+            },
             // { expiresIn: '60d' }
         );
         await redis.set(`session:${token}`, String(user.id), {
             EX: 60 * 60 * 24 * 60 // 60 days;
         });
-    
+
         reply
             .setCookie('checkpoint_jwt', token, {
                 httpOnly: true,
@@ -530,7 +588,7 @@ server.post<{ Body: LoginSchemaType }>('/api/auth/login', async (request, reply)
                 // maxAge: 3600 // (optional) 1 hour in seconds
             })
             .send({ user: { id: user.id, email: user.email }, token });
-    
+
         // const token = server.jwtUser.sign({ userId: user.id });
         // return { user: { id: user.id, email: user.email, name: user.name }, token };
     } catch (err) {
@@ -541,11 +599,13 @@ server.post<{ Body: LoginSchemaType }>('/api/auth/login', async (request, reply)
         console.error('Login error:', err);
         reply.code(500).send({ error: 'An error occurred: ', details: err.message });
     }
-    
+
 });
 
+// Register a new user
+
 server.post('/api/auth/register', async (request, reply) => {
-    
+
     try {
         console.log('Received body data: ', request.body);
         const userBody = request.body as any;
@@ -604,13 +664,21 @@ server.post('/api/auth/register', async (request, reply) => {
         const result = await pool.query(query, values);
 
         if (body.password) {
-            // hash the password using argon2
-            const hashedPassword = await argon2.hash(body.password);
-            // use auth_methods table to store hashed password if set
-            await pool.query(
-                'INSERT INTO auth_methods (user_id, type, metadata) VALUES ($1, $2, $3)',
-                [result.rows[0].id, 'password', JSON.stringify(hashedPassword)]
-            );
+            // check if password is already hashed (check if it starts with $argon2id)
+            if (body.password.startsWith('$argon2id')) {
+                await pool.query(
+                    'INSERT INTO auth_methods (user_id, type, metadata) VALUES ($1, $2, $3)',
+                    [result.rows[0].id, 'password', body.password]
+                );
+            } else {
+                // hash the password using argon2
+                const hashedPassword = await argon2.hash(body.password);
+                // use auth_methods table to store hashed password if set
+                await pool.query(
+                    'INSERT INTO auth_methods (user_id, type, metadata) VALUES ($1, $2, $3)',
+                    [result.rows[0].id, 'password', JSON.stringify(hashedPassword)]
+                );
+            }
         }
 
         const token = await signToken(
@@ -619,7 +687,14 @@ server.post('/api/auth/register', async (request, reply) => {
         await redis.set(`session:${token}`, String(result.rows[0].id), {
             EX: 60 * 60 * 24 * 60 // 60 days;
         });
-        return { user: result.rows[0], token };
+
+        reply
+            .setCookie('checkpoint_jwt', token, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+            })
+            .send({ user: result.rows[0], token });
+        // return { user: result.rows[0], token };
     } catch (err: any) {
         if (err.constraint === 'users_email_key') {
             reply.code(400);
@@ -650,13 +725,14 @@ server.post<{ Body: { email: string } }>('/api/auth/passkey/login/start', async 
             'SELECT metadata FROM auth_methods WHERE user_id = $1 AND type = $2',
             [user.id, 'passkey']
         );
-        const allowedCredentials = credentialsResult.rows.map((row) => {
-            const metadata = row.metadata;
-            return {
-                id: metadata.credentialID,
-                type: 'public-key'
-            };
-        });
+        // const allowedCredentials = credentialsResult.rows.map((row) => {
+        //     const metadata = row.metadata;
+        //     return {
+        //         id: String(metadata.credentialID),
+        //         // transports: ['internal'] as unknown as AuthenticatorTransport[],
+        //     };
+        // });
+        const allowedCredentials = [];
 
         // Generate authentication options for passkey login
         const options = await generateAuthenticationOptions({
@@ -703,10 +779,15 @@ server.post<{ Body: { email: string, response: AuthenticationResponseJSON } }>('
             reply.code(400).send({ error: 'Missing credential id in response' });
             return;
         }
+
+        console.log('Raw credential id:', response.id);
+        const normalizedCredentialId = Buffer.from(response.id).toString('base64url');
+        console.log('Normalized credential id:', normalizedCredentialId);
+
         // Get the credential info from auth_methods
         const credentialResult = await pool.query(
             'SELECT metadata FROM auth_methods WHERE user_id = $1 AND type = $2 AND metadata->>\'credentialID\' = $3',
-            [user.id, 'passkey', response.id]
+            [user.id, 'passkey', normalizedCredentialId]
         );
         if (credentialResult.rowCount === 0) {
             reply.code(400).send({ error: 'Invalid credential provided.' });
@@ -718,11 +799,11 @@ server.post<{ Body: { email: string, response: AuthenticationResponseJSON } }>('
         const verification = await verifyAuthenticationResponse({
             response,
             expectedChallenge,
-            expectedOrigin: process.env.FRONTEND_URL || 'http://localhost:3000',
+            expectedOrigin: process.env.FRONTEND_URL || 'https://localhost:3000',
             expectedRPID: process.env.DOMAIN || 'localhost',
             credential: {
                 id: response.id,
-                publicKey: storedCredential.publicKey,
+                publicKey: isoBase64URL.toBuffer(storedCredential.publicKey),
                 counter: storedCredential.counter,
                 transports: ['internal'],
             }
@@ -732,17 +813,16 @@ server.post<{ Body: { email: string, response: AuthenticationResponseJSON } }>('
             console.log('Passkey authentication successful:', verification);
             // Optionally update the credential counter here if needed
 
-            // Issue a JWT on successful passkey authentication
-            const rolesRes = await pool.query(
-                `SELECT r.name 
-                 FROM user_roles ur
-                 JOIN roles r ON ur.role_id = r.id
-                 WHERE ur.user_id = $1`,
-                [user.id]
-            );
-            const roles = rolesRes.rows.map(row => row.name);
 
-            const token = await signToken({ userId: user.id });
+            const isAdmin = await hasRole(user.id, 'admin');
+
+            const token = await signToken(
+                {
+                    userId: user.id,
+                    isAdmin,
+                }
+            );
+
             await redis.set(`session:${token}`, String(user.id), {
                 EX: 60 * 60 * 24 * 60 // 60 days
             });
@@ -750,13 +830,20 @@ server.post<{ Body: { email: string, response: AuthenticationResponseJSON } }>('
             // Remove the used challenge from Redis
             await redis.del(`authentication_${user.id}`);
 
-            reply.send({ token });
+
+            reply
+                .setCookie('checkpoint_jwt', token, {
+                    httpOnly: true,
+                    secure: process.env.NODE_ENV === 'production',
+                })
+                .send({ success: true, token });
+            // reply.send({success: true, token });
         } else {
             reply.code(400).send({ error: 'Authentication failed.' });
             console.log('Authentication failed:', verification);
         }
     } catch (err) {
-        console.error('Passkey login complete error:', err);
+        console.error('Passkey error:', err);
         reply.code(400).send({ error: 'Invalid authentication response.' });
     }
 });
@@ -864,7 +951,7 @@ server.post('/api/auth/passkey/register/complete', {
                 const verification = await verifyRegistrationResponse({
                     response: request.body as RegistrationResponseJSON,
                     expectedChallenge,
-                    expectedOrigin: process.env.FRONTEND_URL || 'http://localhost:3000',
+                    expectedOrigin: process.env.FRONTEND_URL || 'https://localhost:3000',
                     expectedRPID: process.env.DOMAIN || 'localhost',
                     // attestationType: 'none',
                     // authenticatorSelection: {
@@ -1196,6 +1283,150 @@ server.post('/api/auth/sessions/revoke', {
     },
 });
 
+server.post('/api/auth/2fa/setup', { onRequest: [server.authenticate] }, async (request, reply) => {
+    try {
+        const { userId, email } = request.jwtUser;
+        const recovery_codes = Array.from({ length: 10 }, () => Math.floor(Math.random() * 1000000).toString().padStart(6, '0'));
+        const secret = authenticator.generateSecret();
+        const otpauth = authenticator.keyuri(email, process.env.APP_NAME, secret);
+        const qrCodeDataURL = await QRCode.toDataURL(otpauth);
+
+        await pool.query(
+            'INSERT INTO user_2fa (user_id, totp_secret, recovery_codes) VALUES ($1, $2, $3::jsonb)',
+            [userId, secret, JSON.stringify(recovery_codes)]
+        );
+
+        reply.send({ qrCodeDataURL, otpauth, recovery_codes });
+    } catch (error) {
+        console.error('2FA setup error:', error);
+        reply.code(500).send({ error: 'Failed to set up 2FA: ', details: error.message });
+    }
+});
+
+server.post<{ Body: { code: string } }>('/api/auth/2fa/verify', { onRequest: [server.authenticate] }, async (request, reply) => {
+    try {
+        const { userId } = request.jwtUser;
+        const { code } = request.body; // Only code is expected.
+        const result = await pool.query('SELECT totp_secret FROM user_2fa WHERE user_id = $1', [userId]);
+
+        if (result.rowCount === 0) {
+            return reply.code(404).send({ error: 'User not found' });
+        }
+        const totpSecret = result.rows[0].totp_secret;
+        console.log(totpSecret);
+        if (!totpSecret) {
+            return reply.code(400).send({ error: '2FA not set up for this user' });
+        }
+        const isValid = authenticator.check(code, totpSecret);
+        console.log('2FA verification result:', { code, totpSecret, isValid });
+        if (!isValid) {
+            return reply.code(400).send({ error: 'Invalid TOTP code' });
+        }
+        await pool.query('UPDATE users SET two_factor_enabled = TRUE WHERE id = $1', [userId]);
+        reply.send({ success: true });
+    } catch (error) {
+        console.log('2FA verification error:', error);
+        reply.code(500).send({ error: 'Failed to verify 2FA', details: error.message });
+    }
+});
+
+
+server.post('/api/auth/2fa/disable', { onRequest: [server.authenticate] }, async (request, reply) => {
+    try {
+        const { userId } = request.jwtUser!;
+        const { code } = request.body as { code: string };
+        console.log('Disabling 2FA for user:', userId, code);
+
+        // Verify the TOTP code before disabling
+        const result = await pool.query('SELECT totp_secret FROM user_2fa WHERE user_id = $1', [userId]);
+        if (result.rowCount === 0) {
+            return reply.code(404).send({ error: 'User not found' });
+        }
+        const { totp_secret } = result.rows[0];
+
+        const isValid = authenticator.check(code, totp_secret);
+        if (!isValid) {
+            console.error('Invalid TOTP code:', { code }, 'for user:', userId);
+            return reply.code(400).send({ error: 'Invalid TOTP code' });
+        }
+
+        // Disable 2FA and remove the secret
+        await pool.query('UPDATE users SET two_factor_enabled = FALSE WHERE id = $1', [userId]);
+        await pool.query('DELETE FROM user_2fa WHERE user_id = $1', [userId]);
+        console.log('2FA disabled for user:', userId);
+        reply.send({ success: true });
+    } catch (error) {
+        console.error('2FA disable error:', error);
+        reply.code(500).send({ error: 'Failed to disable 2FA', details: error.message });
+    }
+});
+
+server.post('/api/auth/2fa/login/verify', async (request, reply) => {
+    try {
+        // Expect a temporary token with pending2FA flag and a TOTP code.
+        const { tempToken, code } = request.body as { tempToken: string; code: string };
+
+        if (typeof tempToken !== 'string' || !tempToken) {
+            console.log('Invalid temporary token:', {tempToken});
+            return reply.code(400).send({ error: 'Invalid temporary token' });
+        }
+
+        // Verify the temporary token.
+        const payload = await verifyToken(tempToken);
+        if (!payload.pending2FA) {
+            console.log('Invalid temporary token:', {tempToken});
+            return reply.code(400).send({ error: 'Invalid token for 2FA verification' });
+        }
+        const userId = payload.userId;
+
+        // Fetch the user's TOTP secret.
+        const result = await pool.query('SELECT totp_secret, recovery_codes FROM user_2fa WHERE user_id = $1', [userId]);
+        if (result.rowCount === 0) {
+            return reply.code(404).send({ error: 'User not found' });
+        }
+        const totpSecret = result.rows[0].totp_secret;
+        let recovery_codes = result.rows[0].recovery_codes as string[];
+        console.log(result.rows[0].recovery_codes);
+        if (!totpSecret) {
+            console.log('2FA not set up for this user:', {userId});
+            return reply.code(400).send({ error: '2FA not set up for this user' });
+        }
+
+        // Verify the provided TOTP code.
+        console.log(recovery_codes);
+        const isValid = authenticator.check(code, totpSecret) || recovery_codes.includes(code);
+        if (!isValid) {
+            console.log('Invalid TOTP code:', {code});
+            return reply.code(400).send({ error: 'Invalid TOTP code' });
+        }
+
+        // If the code is valid, issue the final token.
+        const isAdmin = await hasRole(userId, 'admin');
+        const finalToken = await signToken(
+            {
+                userId: userId,
+                isAdmin,
+            }
+        );
+        await redis.set(`session:${finalToken}`, String(userId), { EX: 60 * 60 * 24 * 60 }); // 60 days
+
+        // if a recovery code was used, remove it from the list
+        if (recovery_codes.includes(code)) {
+            await pool.query(
+            'UPDATE user_2fa SET recovery_codes = $1 WHERE user_id = $2',
+            [JSON.stringify(recovery_codes.filter((rc: string) => rc !== code)), userId]
+            );
+        }
+
+        // Remove the temporary challenge (if any) from Redis.
+        // (Optional: you might remove a challenge key if you store one for login.)
+        reply.send({ success: true, token: finalToken });
+    } catch (error: any) {
+        console.error('2FA login verification error:', error);
+        reply.code(500).send({ error: error.message || 'Failed to verify 2FA' });
+    }
+});
+
 
 // Protected route example
 // server.get('/api/user', {
@@ -1314,22 +1545,17 @@ server.get('/api/auth/sso/google', passport.authenticate('google', {
 server.get('/api/auth/sso/google/callback', {
     preHandler: passport.authenticate('google', { session: false }),
     handler: async (request, reply) => {
-        const user = request.user as { id: number; email?: string };
+        const user = request.user as { id: string; email?: string };
 
         // 3) Create your own JWT
-        const rolesRes = await pool.query(
-            `SELECT r.name 
-        FROM user_roles ur
-        JOIN roles r ON ur.role_id = r.id
-        WHERE ur.user_id = $1`,
-            [user.id]
-        );
-        const roles = rolesRes.rows.map(row => row.name);
-        const isAdmin = roles.includes('admin');
+        const isAdmin = await hasRole(user.id, 'admin');
 
         // Sign and return a JWT token
         const token = await signToken(
-            { userId: user.id },
+            {
+                userId: user.id,
+                isAdmin,
+            },
         );
         await redis.set(`session:${token}`, String(user.id), {
             EX: 60 * 60 * 24 * 60 // 60 days;
@@ -1430,7 +1656,7 @@ server.get('/api/users', {
             try {
                 const result = await pool.query(
                     `
-                    SELECT id, email, first_name, last_name, created_at
+                    SELECT *
                         FROM users
                     WHERE email ILIKE $1
                         OR first_name ILIKE $1
@@ -1440,7 +1666,29 @@ server.get('/api/users', {
                     `,
                     [likeQuery, pageSize, offset]
                 );
-                reply.send(result.rows);
+                // for each result, parse each row as UserSchema then add to outgoing array
+                console.log(result.rows);
+                const _outgoing = result.rows.map((row) => {
+                    let json_encoded_address = JSON.parse(row.address);
+                    let parsedResult = {
+                        id: row.id,
+                        email: row.email,
+                        public_key: row.public_key,
+                        created_at: row.created_at,
+                        two_factor_enabled: row.two_factor_enabled,
+                        profile: {
+                            first_name: row.first_name,
+                            last_name: row.last_name,
+                            profile_picture: row.profile_picture || '',
+                            dateOfBirth: row.dateofbirth,
+                            phone: row.phone_number,
+                            address: json_encoded_address,
+                        },
+                    };
+                    return UserSchema.parse(parsedResult);
+                });
+                // console.log(_outgoing);
+                reply.send(_outgoing);
             } catch (err) {
                 reply.status(500).send({ error: 'Database error' });
             }
@@ -1456,31 +1704,35 @@ server.get('/api/users/:id', {
     handler: async (request, reply) => {
         const { id } = request.params as { id: string };
         try {
+            // only allow users to view their own profile, or admins to view any profile
             if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
                 return reply.status(403).send({ error: 'Forbidden' });
             }
 
             const result = await pool.query(
-                'SELECT id, email, first_name, last_name, public_key, profile_picture, dateOfBirth, phone_number, address, created_at FROM users WHERE id = $1',
+                'SELECT * FROM users WHERE id = $1',
                 [id]
             );
+            console.log(result.rows[0]);
             // console.log(result.rows[0]);
             let json_encoded_address = JSON.parse(result.rows[0].address);
             let parsedResult = {
                 id: result.rows[0].id,
                 email: result.rows[0].email,
                 public_key: result.rows[0].public_key,
+                created_at: result.rows[0].created_at,
+                two_factor_enabled: result.rows[0].two_factor_enabled,
                 profile: {
                     first_name: result.rows[0].first_name,
                     last_name: result.rows[0].last_name,
-                    profile_picture: result.rows[0].profile_picture,
+                    profile_picture: result.rows[0].profile_picture || '',
                     dateOfBirth: result.rows[0].dateofbirth,
                     phone: result.rows[0].phone_number,
                     address: json_encoded_address,
                 },
-                created_at: result.rows[0].created_at ?? new Date(),
             };
             let outgoing_ = UserSchema.parse(parsedResult);
+            console.log(outgoing_);
 
             // get date time last changed password
             const password_changed_at = await pool.query(
@@ -1496,7 +1748,6 @@ server.get('/api/users/:id', {
             }
             reply.send(outgoing_);
         } catch (err) {
-            console.log(err);
             reply.status(500).send({ message: 'An error occurred: ' + err });
         }
     },
@@ -1534,9 +1785,11 @@ server.delete('/api/users/:id', {
     onRequest: [server.authenticate],
     handler: async (request, reply) => {
         const { id } = request.params as { id: string };
+        // const requester_permissions = getUserPermissions(String(request.jwtUser.userId));
         try {
-            if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
-              return reply.status(403).send({ error: 'Forbidden' });
+            // allow user to delete their own account, or an admin to delete any account
+            if (request.jwtUser.userId !== id && !hasPermission(String(request.jwtUser.userId), 'users.delete')) {
+                return reply.status(403).send({ error: 'Forbidden' });
             }
 
             const result = await pool.query(
@@ -1548,6 +1801,7 @@ server.delete('/api/users/:id', {
             }
             reply.send({ success: true, userId: id });
         } catch (err) {
+            console.log(err);
             reply.status(500).send({ error: 'Database error' });
         }
     },

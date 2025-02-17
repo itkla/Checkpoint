@@ -43,6 +43,24 @@ CREATE TABLE auth_methods (
     )
 );
 
+-- Create MFA/2FA table
+CREATE TABLE user_2fa (
+    user_id VARCHAR(255) PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    totp_secret TEXT NOT NULL,
+    two_factor_enabled BOOLEAN DEFAULT TRUE,
+    recovery_codes JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create user_logs table
+CREATE TABLE user_logs (
+    id SERIAL PRIMARY KEY,
+    user_id VARCHAR(20) REFERENCES users(id) ON DELETE CASCADE,
+    action VARCHAR(255) NOT NULL,
+    details JSONB,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Create sso_providers table
 CREATE TABLE sso_providers (
     id SERIAL PRIMARY KEY,

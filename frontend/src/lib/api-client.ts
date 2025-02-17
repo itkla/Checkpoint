@@ -10,7 +10,7 @@ import type {
 } from '@/app/types/user';
 import { register } from 'module';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://localhost:3001';
 
 const apiClient = axios.create({
     baseURL: API_URL,
@@ -109,7 +109,7 @@ export const authApi = {
     },
 
     verify2FA: async (code: string) => {
-        const response = await apiClient.post('/api/auth/verify-2fa', { code });
+        const response = await apiClient.post('/api/auth/2fa/verify', { code });
         return response.data;
     },
 
@@ -170,7 +170,12 @@ export const authApi = {
     changePassword: async (data: { oldPassword: string; newPassword: string }) => {
         const response = await apiClient.put('/api/auth/change-password', data);
         return response.data;
-    }
+    },
+
+    verify2FALogin: async ({ tempToken, code }: { tempToken: string; code: string }) => {
+        const response = await apiClient.post('/api/auth/2fa/login/verify', { tempToken, code });
+        return response.data;
+    },
 };
 
 export const userApi = {
@@ -178,6 +183,7 @@ export const userApi = {
         const response = await apiClient.get<User[]>('/api/users', {
             params: { search, page, pageSize },
         });
+        console.log('Users:', response.data); // Debug log
         return response.data;
     },
 

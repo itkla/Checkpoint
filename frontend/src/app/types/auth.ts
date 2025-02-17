@@ -142,4 +142,49 @@ export interface AuthResponse {
     };
     token: string;
     requiresVerification?: boolean;
+    twoFactorRequired?: boolean;
+    tempToken?: string;
+}
+
+export interface PasskeyCredential {
+    id: string;
+    rawId: string;
+    response: {
+        clientDataJSON: string;
+        authenticatorData: string;
+        signature: string;
+        userHandle?: string;
+    };
+    type: 'public-key';
+}
+
+// Add any other related types here
+export interface UserAuthMethod {
+    id: string;
+    type: 'password' | 'passkey' | 'biometric' | 'sso';
+    is_preferred: boolean;
+    metadata?: Record<string, any>;
+    created_at: string;
+    last_used_at?: string;
+}
+
+export interface UserProfile {
+    id: string;
+    user_id: string;
+    first_name: string;
+    last_name: string;
+    phone: string;
+    department: string;
+    profile_pic: string;
+    created_at: string;
+    updated_at: string;
+    dateOfBirth: Date;
+}
+
+export interface UserActivityLog {
+    id: string;
+    type: 'login' | 'password_change' | 'profile_update' | 'security_event';
+    description: string;
+    timestamp: string;
+    metadata?: Record<string, any>;
 }

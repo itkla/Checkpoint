@@ -21,10 +21,11 @@ export interface User {
         }
     }
     department?: string;
-    joined_date?: string;
+    created_at?: string;
     last_login?: string;
     permissions?: string[];
     password_changed_at?: string;
+    two_factor_enabled?: boolean;
 }
 
 export interface AuthResponse {
@@ -34,6 +35,8 @@ export interface AuthResponse {
     };
     token: string;
     requiresVerification?: boolean;
+    twoFactorRequired?: boolean;
+    tempToken?: string;
 }
 
 export interface LoginCredentials {

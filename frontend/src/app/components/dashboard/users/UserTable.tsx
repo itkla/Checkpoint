@@ -149,11 +149,11 @@ export default function UserTable() {
                             </TableCell>
                             <TableCell className="flex items-center">
                                 <img
-                                    src={user.profile_pic || "https://placehold.co/50"}
-                                    alt={user.first_name || user.email}
+                                    src={user.profile?.profile_pic || "https://placehold.co/50"}
+                                    alt={user.profile?.first_name || user.email}
                                     className="w-6 h-6 rounded-full mr-2"
                                 />
-                                {user.first_name || user.email}
+                                {user.profile?.first_name || user.email}
                             </TableCell>
                             <TableCell>{user.email}</TableCell>
                             <TableCell>{user.role || 'N/A'}</TableCell>

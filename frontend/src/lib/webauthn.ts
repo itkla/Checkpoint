@@ -6,7 +6,7 @@ import {
 
 import { isoBase64URL } from '@simplewebauthn/server/helpers'
 
-const backendApiUrl = process.env.REACT_APP_BACKEND_API_URL || 'http://localhost:3001';
+const backendApiUrl = process.env.REACT_APP_BACKEND_API_URL || 'https://localhost:3001';
 
 export async function registerPasskey(name: string) {
     try {
@@ -111,7 +111,7 @@ export async function loginWithPasskey(email: string) {
         if (!verificationResponse.ok) {
             throw new Error(verificationData.error || 'Failed to verify credential');
         }
-
+        localStorage.setItem('token', verificationData.token);
         return verificationData;
     } catch (error: any) {
         console.error('Passkey authentication error:', error);

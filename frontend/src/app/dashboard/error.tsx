@@ -14,11 +14,57 @@ export default function DashboardError({
     const { toast } = useToast();
     useEffect(() => {
         console.error(error);
-        toast({
-            title: "エラー",
-            description: error.message || "エラーが発生しました",
-            variant: "destructive",
-        });
+        
+        if (error.status) {
+            switch (error.status) {
+                case (403): {
+                    toast({
+                        title: "エラー",
+                        description: "アクセスが拒否されました",
+                        variant: "destructive",
+                    });
+                    return;
+                }
+                case (404): {
+                    toast({
+                        title: "エラー",
+                        description: "リソースが見つかりません",
+                        variant: "destructive",
+                    });
+                    return;
+                }
+                case (500): {
+                    toast({
+                        title: "エラー",
+                        description: "サーバーエラーが発生しました",
+                        variant: "destructive",
+                    });
+                    return;
+                }
+                case (502): {
+                    toast({
+                        title: "エラー",
+                        description: "サーバーがダウンしています",
+                        variant: "destructive",
+                    });
+                    return;
+                }
+                default: {
+                    toast({
+                        title: "エラー",
+                        description: error.message || "エラーが発生しました",
+                        variant: "destructive",
+                    });
+                    return;
+                }
+            }   
+        } else {
+            toast({
+                title: "エラー",
+                description: error.message || "エラーが発生しました",
+                variant: "destructive",
+            });
+        }
     }, [error]);
 
     return (
