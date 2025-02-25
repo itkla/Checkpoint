@@ -6,7 +6,7 @@ import Multipart from '@fastify/multipart';
 
 import { signToken, verifyToken, decodeToken } from './utils/jwt-utils';
 import cookie from '@fastify/cookie';
-import { Pool } from 'pg';
+import { pool, redis } from './utils/db';
 // import bcrypt from 'bcrypt';
 import * as argon2 from 'argon2';
 import { z, ZodError } from 'zod';
@@ -48,28 +48,34 @@ import { encryptPrivateKey, EncryptedPayload } from './utils/crypto-utils';
 import { profile } from 'console';
 import { json } from 'stream/consumers';
 import { get } from 'http';
+import authMethodsRoutes from './routes/auth-methods.routes';
+import authRoutes from './routes/auth.routes';
+import userRoutes from './routes/user.routes';
+import rolesRoutes from './routes/roles.routes';
+import ssoRoutes from './routes/sso.routes';
+import logsRoutes from './routes/logs.routes';
 
-type UserIdParam = {
-    id: string;  // The 'id' param is a string (e.g. your random 20-char user ID)
-};
+// type UserIdParam = {
+//     id: string;  // The 'id' param is a string (e.g. random 20-char user ID)
+// };
 
-type AuthMethodIdParam = {
-    authMethodId: string;
-    credentialId?: string;
-};
+// type AuthMethodIdParam = {
+//     authMethodId: string;
+//     credentialId?: string;
+// };
 
-type ProviderIdParam = {
-    id: string;
-};
+// type ProviderIdParam = {
+//     id: string;
+// };
 
-type RoleIdBody = {
-    roleId: number;  // The body contains 'roleId' when assigning a role to a user
-};
+// type RoleIdBody = {
+//     roleId: number;  // The body contains 'roleId' when assigning a role to a user
+// };
 
-type SsoConnectionBody = {
-    provider_id: number;
-    external_user_id: string;
-};
+// type SsoConnectionBody = {
+//     provider_id: number;
+//     external_user_id: string;
+// };
 
 // Extend FastifyInstance type to include JWT
 declare module 'fastify' {
@@ -107,23 +113,23 @@ declare module '@fastify/passport' {
 
 dotenv.config();
 
-const pool = new Pool({
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    host: process.env.DB_HOST,
-    port: Number(process.env.DB_PORT),
-    database: process.env.DB_NAME,
-});
+// const pool = new Pool({
+//     user: process.env.DB_USER,
+//     password: process.env.DB_PASSWORD,
+//     host: process.env.DB_HOST,
+//     port: Number(process.env.DB_PORT),
+//     database: process.env.DB_NAME,
+// });
 
-const redis = createClient({
-    // url: `redis://:${process.env.REDIS_PASSWORD}@${process.env.REDIS_HOST}:${process.env.REDIS_PORT}`,
-});
-redis.connect()
-    .then(() => console.log('Connected to Redis'))
-    .catch((err) => {
-        console.error('An error occurred connecting to Redis:', err);
-        process.exit(1);
-    });
+// const redis = createClient({
+//     // url: `redis://:${process.env.REDIS_PASSWORD}@${process.env.REDIS_HOST}:${process.env.REDIS_PORT}`,
+// });
+// redis.connect()
+//     .then(() => console.log('Connected to Redis'))
+//     .catch((err) => {
+//         console.error('An error occurred connecting to Redis:', err);
+//         process.exit(1);
+//     });
 
 const server = fastify({
     logger: true,
@@ -174,14 +180,14 @@ server.decorate('authenticate', async (request, reply) => {
             return reply.code(401).send({ error: 'No token provided' });
         }
 
-        // 1) Verify JWT with jose
+        // Verify JWT with jose
         const payload = await verifyToken(token);
 
-        // 2) Optionally store the payload on request
-        // (so the rest of your code can do request.jwtUser.userId)
+        // Optionally store the payload on request
+        // (so the rest of code can do request.jwtUser.userId)
         request.jwtUser = payload as { userId: string | number; isAdmin?: boolean };
 
-        // 3) Check session in Redis (like before)
+        // Check session in Redis (like before)
         const sessionKey = `session:${token}`;
         const sessionUserId = await redis.get(sessionKey);
         if (!sessionUserId) {
@@ -222,6 +228,15 @@ try {
         namespace: 'jwtUser',
         decoratorName: 'jwtUser'
     });
+
+    // register routes
+    server.register(authMethodsRoutes, {prefix: '/api/auth-methods'});
+    server.register(authRoutes, {prefix: '/api/auth'});
+    server.register(userRoutes, {prefix: '/api/users'});
+    server.register(rolesRoutes, {prefix: '/api/roles'});
+    server.register(ssoRoutes, {prefix: '/api/sso'});
+    server.register(logsRoutes, {prefix: '/api/logs'});
+
     console.log('Registered plugins');
 } catch (err) {
     console.error('Error registering plugins:', err);
@@ -528,1802 +543,1816 @@ async function generateUUID() {
 Handles all authentication-related routes
 */
 
-server.post<{ Body: LoginSchemaType }>('/api/auth/login', async (request, reply) => {
-    try {
-        const validated = LoginSchema.parse(request.body);
-        const { email, password } = validated;
+// server.post<{ Body: LoginSchemaType }>('/api/auth/login', async (request, reply) => {
+//     try {
+//         const validated = LoginSchema.parse(request.body);
+//         const { email, password } = validated;
 
-        const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-        const user = result.rows[0];
+//         const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+//         const user = result.rows[0];
 
-        if (!user) {
-            reply.code(401).send({ error: 'Invalid credentials' });
-            return;
-        }
+//         if (!user) {
+//             reply.code(401).send({ error: 'Invalid credentials' });
+//             return;
+//         }
 
-        const authResult = await pool.query(
-            'SELECT metadata FROM auth_methods WHERE user_id = $1 AND type = $2',
-            [user.id, 'password']
-        );
-        const authMethod = authResult.rows[0];
-        // console.log(authMethod);
+//         const authResult = await pool.query(
+//             'SELECT metadata FROM auth_methods WHERE user_id = $1 AND type = $2',
+//             [user.id, 'password']
+//         );
+//         const authMethod = authResult.rows[0];
+//         // console.log(authMethod);
 
-        if (!authMethod || !(await argon2.verify(authMethod.metadata, password))) {
-            reply.code(401).send({ error: 'Invalid credentials' });
-            return;
-        }
+//         if (!authMethod || !(await argon2.verify(authMethod.metadata, password))) {
+//             reply.code(401).send({ error: 'Invalid credentials' });
+//             return;
+//         }
 
-        const isAdmin = await hasRole(user.id, 'admin');
-        // console.log(roles, isAdmin, user.id);
+//         const isAdmin = await hasRole(user.id, 'admin');
+//         // console.log(roles, isAdmin, user.id);
 
-        // check to see if user has 2FA enabled
-        if (user.two_factor_enabled) {
-            // Generate a temporary token with a pending2FA flag.
-            const tempToken = await signToken({ userId: user.id, pending2FA: true });
-            console.log('2FA required for user:', {userId: user.id, tempToken});
-            // Optionally, store this token in Redis if needed.
-            await redis.set(`ryftsession:${tempToken}`, String(user.id), { EX: 60 * 60 * 24 * 60 }); // 60 days
-            // Return the temporary token and a flag indicating 2FA is required.
-            return reply.send({ twoFactorRequired: true, tempToken });
-          }
+//         // check to see if user has 2FA enabled
+//         if (user.two_factor_enabled) {
+//             // Generate a temporary token with a pending2FA flag.
+//             const tempToken = await signToken({ userId: user.id, pending2FA: true });
+//             console.log('2FA required for user:', {userId: user.id, tempToken});
+//             // Optionally, store this token in Redis if needed.
+//             await redis.set(`ryftsession:${tempToken}`, String(user.id), { EX: 60 * 60 * 24 * 60 }); // 60 days
+//             // Return the temporary token and a flag indicating 2FA is required.
+//             return reply.send({ twoFactorRequired: true, tempToken });
+//           }
 
-        // Sign and return a JWT token
-        // console.log('server.jwtUser:' + server.jwtUser);
-        const token = await signToken(
-            {
-                userId: user.id,
-                isAdmin,
-            },
-            // { expiresIn: '60d' }
-        );
-        await redis.set(`session:${token}`, String(user.id), {
-            EX: 60 * 60 * 24 * 60 // 60 days;
-        });
+//         // Sign and return a JWT token
+//         // console.log('server.jwtUser:' + server.jwtUser);
+//         const token = await signToken(
+//             {
+//                 userId: user.id,
+//                 isAdmin,
+//             },
+//             // { expiresIn: '60d' }
+//         );
+//         await redis.set(`session:${token}`, String(user.id), {
+//             EX: 60 * 60 * 24 * 60 // 60 days;
+//         });
 
-        reply
-            .setCookie('checkpoint_jwt', token, {
-                httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                path: '/',
-                // maxAge: 3600 // (optional) 1 hour in seconds
-            })
-            .send({ user: { id: user.id, email: user.email }, token });
+//         reply
+//             .setCookie('checkpoint_jwt', token, {
+//                 httpOnly: true,
+//                 secure: process.env.NODE_ENV === 'production',
+//                 path: '/',
+//                 // maxAge: 3600 // (optional) 1 hour in seconds
+//             })
+//             .send({ user: { id: user.id, email: user.email }, token });
 
-        // const token = server.jwtUser.sign({ userId: user.id });
-        // return { user: { id: user.id, email: user.email, name: user.name }, token };
-    } catch (err) {
-        if (err instanceof z.ZodError) {
-            reply.code(400).send({ error: 'Invalid request', details: err.issues });
-            return;
-        }
-        console.error('Login error:', err);
-        reply.code(500).send({ error: 'An error occurred: ', details: err.message });
-    }
+//         // const token = server.jwtUser.sign({ userId: user.id });
+//         // return { user: { id: user.id, email: user.email, name: user.name }, token };
+//     } catch (err) {
+//         if (err instanceof z.ZodError) {
+//             reply.code(400).send({ error: 'Invalid request', details: err.issues });
+//             return;
+//         }
+//         console.error('Login error:', err);
+//         reply.code(500).send({ error: 'An error occurred: ', details: err.message });
+//     }
 
-});
+// });
 
 // Register a new user
 
-server.post('/api/auth/register', async (request, reply) => {
-
-    try {
-        console.log('Received body data: ', request.body);
-        const userBody = request.body as any;
-        // You can parse verbosely using safeParse:
-        const parseResult = UserSchema.safeParse({
-            ...userBody,
-            profile: {
-                ...userBody.profile,
-                dateOfBirth: new Date(userBody.profile.dateOfBirth)
-            },
-        });
-        if (!parseResult.success) {
-            console.error(parseResult.error);
-            throw new Error('Invalid request data');
-        }
-        const body = parseResult.data;
-
-        // This fails because extra fields like "department" and "authMethod" 
-        // are not defined in UserSchema, and dateOfBirth is passed as a string 
-        // when z.date() expects a Date object.
-        console.log('Parsed body:', body);
-
-        // const body = UserSchema.parse(request.body);
-        // generate pgp keypair for user federation
-        const { publicKey, privateKey } = await openpgp.generateKey({
-            userIDs: [{ name: body.profile.last_name, email: body.email }],
-            type: 'ecc',
-            curve: 'curve25519Legacy',
-            format: 'armored'
-        });
-
-        const encryptedPrivateKey: EncryptedPayload = encryptPrivateKey(privateKey);
-
-        const userId = await generateUUID();
-        const insertFields = {
-            id: userId,
-            email: body.email,
-            first_name: body.profile.first_name,
-            last_name: body.profile.last_name,
-            public_key: publicKey,
-            private_key: encryptedPrivateKey,
-            dateOfBirth: body.profile.dateOfBirth,
-            phone_number: body.profile.phone,
-            address: body.profile.address,
-        };
-
-        console.log('Inserting user:', insertFields);
-        const columns = Object.keys(insertFields);
-        const values = Object.values(insertFields);
-        const placeholders = columns.map((_, i) => `$${i + 1}`);
-        const query = `INSERT INTO users (${columns.join(
-            ', '
-        )}) VALUES (${placeholders.join(
-            ', '
-        )}) RETURNING id, email`;
-        const result = await pool.query(query, values);
-
-        if (body.password) {
-            // check if password is already hashed (check if it starts with $argon2id)
-            if (body.password.startsWith('$argon2id')) {
-                await pool.query(
-                    'INSERT INTO auth_methods (user_id, type, metadata) VALUES ($1, $2, $3)',
-                    [result.rows[0].id, 'password', body.password]
-                );
-            } else {
-                // hash the password using argon2
-                const hashedPassword = await argon2.hash(body.password);
-                // use auth_methods table to store hashed password if set
-                await pool.query(
-                    'INSERT INTO auth_methods (user_id, type, metadata) VALUES ($1, $2, $3)',
-                    [result.rows[0].id, 'password', JSON.stringify(hashedPassword)]
-                );
-            }
-        }
-
-        const token = await signToken(
-            { userId: result.rows[0].id },
-        );
-        await redis.set(`session:${token}`, String(result.rows[0].id), {
-            EX: 60 * 60 * 24 * 60 // 60 days;
-        });
-
-        reply
-            .setCookie('checkpoint_jwt', token, {
-                httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-            })
-            .send({ user: result.rows[0], token });
-        // return { user: result.rows[0], token };
-    } catch (err: any) {
-        if (err.constraint === 'users_email_key') {
-            reply.code(400);
-            return { error: 'Email already exists' };
-        } else if (err instanceof ZodError) {
-            reply.code(400);
-            return { error: 'Invalid request', details: err.issues };
-        } else {
-            throw err;
-        }
-    }
-});
-
-server.post<{ Body: { email: string } }>('/api/auth/passkey/login/start', async (request, reply) => {
-    try {
-        const { email } = request.body;
-
-        // Ensure the user exists
-        const userResult = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-        if (userResult.rowCount === 0) {
-            reply.code(400).send({ error: 'User does not exist.' });
-            return;
-        }
-        const user = userResult.rows[0];
-
-        // Retrieve stored passkey credentials for the user
-        const credentialsResult = await pool.query(
-            'SELECT metadata FROM auth_methods WHERE user_id = $1 AND type = $2',
-            [user.id, 'passkey']
-        );
-        // const allowedCredentials = credentialsResult.rows.map((row) => {
-        //     const metadata = row.metadata;
-        //     return {
-        //         id: String(metadata.credentialID),
-        //         // transports: ['internal'] as unknown as AuthenticatorTransport[],
-        //     };
-        // });
-        const allowedCredentials = [];
-
-        // Generate authentication options for passkey login
-        const options = await generateAuthenticationOptions({
-            rpID,
-            allowCredentials: allowedCredentials,
-            userVerification: 'preferred',
-        });
-
-        // Store only the challenge in Redis for later verification
-        await redis.set(`authentication_${user.id}`, options.challenge, { EX: 300 });
-        reply.send(options);
-    } catch (error) {
-        console.error('Passkey login start error:', error);
-        reply.code(500).send({
-            error: 'Failed to start passkey login',
-            details: error instanceof Error ? error.message : 'Unknown error'
-        });
-    }
-});
-
-
-server.post<{ Body: { email: string, response: AuthenticationResponseJSON } }>('/api/auth/passkey/login/complete', async (request, reply) => {
-    const { email, response } = request.body;
-
-    // Ensure the user exists
-    const userResult = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-    if (userResult.rowCount === 0) {
-        console.log('User does not exist:', email);
-        reply.code(400).send({ error: 'User does not exist.' });
-        return;
-    }
-    const user = userResult.rows[0];
-
-    // Retrieve the expected challenge from Redis
-    const expectedChallenge = await redis.get(`authentication_${user.id}`);
-    if (!expectedChallenge) {
-        console.log('Authentication session expired or invalid:', user.id);
-        reply.code(400).send({ error: 'Authentication session expired or invalid.' });
-        return;
-    }
-
-    try {
-        if (!response || !response.id) {
-            reply.code(400).send({ error: 'Missing credential id in response' });
-            return;
-        }
-
-        console.log('Raw credential id:', response.id);
-        const normalizedCredentialId = Buffer.from(response.id).toString('base64url');
-        console.log('Normalized credential id:', normalizedCredentialId);
-
-        // Get the credential info from auth_methods
-        const credentialResult = await pool.query(
-            'SELECT metadata FROM auth_methods WHERE user_id = $1 AND type = $2 AND metadata->>\'credentialID\' = $3',
-            [user.id, 'passkey', normalizedCredentialId]
-        );
-        if (credentialResult.rowCount === 0) {
-            reply.code(400).send({ error: 'Invalid credential provided.' });
-            return;
-        }
-        const storedCredential = credentialResult.rows[0].metadata;
-
-        // Verify the authentication response using @simplewebauthn/server
-        const verification = await verifyAuthenticationResponse({
-            response,
-            expectedChallenge,
-            expectedOrigin: process.env.FRONTEND_URL || 'https://localhost:3000',
-            expectedRPID: process.env.DOMAIN || 'localhost',
-            credential: {
-                id: response.id,
-                publicKey: isoBase64URL.toBuffer(storedCredential.publicKey),
-                counter: storedCredential.counter,
-                transports: ['internal'],
-            }
-        });
-
-        if (verification.verified) {
-            console.log('Passkey authentication successful:', verification);
-            // Optionally update the credential counter here if needed
-
-
-            const isAdmin = await hasRole(user.id, 'admin');
-
-            const token = await signToken(
-                {
-                    userId: user.id,
-                    isAdmin,
-                }
-            );
-
-            await redis.set(`session:${token}`, String(user.id), {
-                EX: 60 * 60 * 24 * 60 // 60 days
-            });
-
-            // Remove the used challenge from Redis
-            await redis.del(`authentication_${user.id}`);
-
-
-            reply
-                .setCookie('checkpoint_jwt', token, {
-                    httpOnly: true,
-                    secure: process.env.NODE_ENV === 'production',
-                })
-                .send({ success: true, token });
-            // reply.send({success: true, token });
-        } else {
-            reply.code(400).send({ error: 'Authentication failed.' });
-            console.log('Authentication failed:', verification);
-        }
-    } catch (err) {
-        console.error('Passkey error:', err);
-        reply.code(400).send({ error: 'Invalid authentication response.' });
-    }
-});
-
-server.post('/api/auth/passkey/register/start', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        try {
-            const { userId } = request.jwtUser; // Get the authenticated user's ID
-            const { name } = request.body as { name: string };
-
-            if (!name) {
-                return reply.code(400).send({ error: 'Name is required' });
-            }
-
-            // Get user from database
-            const userResult = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
-            if (userResult.rowCount === 0) {
-                return reply.code(404).send({ error: 'User not found' });
-            }
-            const user = userResult.rows[0];
-
-            const userIdBuffer = stringToBuffer(user.id);
-
-            console.log('Generating registration options...');
-
-            // Generate registration options
-            const options = await generateRegistrationOptions({
-                rpName: 'Checkpoint',
-                rpID: process.env.DOMAIN || 'localhost',
-                userID: userIdBuffer,
-                userName: user.email,
-                attestationType: 'none',
-                authenticatorSelection: {
-                    residentKey: 'preferred',
-                    userVerification: 'preferred',
-                    authenticatorAttachment: 'platform',
-                },
-            });
-
-            console.log('Generated options:', options);
-
-            // Store challenge in Redis for verification later
-            await redis.set(
-                `passkey_challenge:${user.id}`,
-                options.challenge,
-                { EX: 300 } // 5 minute expiration
-            );
-
-            return reply.send(options);
-        } catch (error) {
-            console.error('Passkey registration start error:', error);
-            return reply.code(500).send({
-                error: 'Failed to start registration',
-                details: error instanceof Error ? error.message : 'Unknown error'
-            });
-        }
-    }
-});
-
-server.options('/api/auth/passkey/register/start', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-
-        const { userId } = request.jwtUser; // Get the authenticated user's ID
-        const { name } = request.body as { name: string };
-
-        // Get user from database
-        const userResult = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
-        if (userResult.rowCount === 0) {
-            return reply.code(404).send({ error: 'User not found' });
-        }
-        const user = userResult.rows[0];
-        // send passkey registration options
-        const options = await generateRegistrationOptions({
-            rpName: 'Your App Name',
-            rpID: process.env.DOMAIN || 'localhost',
-            userID: user.id,
-            userName: user.email,
-            attestationType: 'none',
-            authenticatorSelection: {
-                residentKey: 'preferred',
-                userVerification: 'preferred',
-                authenticatorAttachment: 'platform',
-            },
-        });
-
-    }
-});
-
-server.post('/api/auth/passkey/register/complete', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        try {
-            const { userId } = request.jwtUser;
-            const expectedChallenge = await redis.get(`passkey_challenge:${userId}`);
-            if (!expectedChallenge) {
-                return reply.code(400).send({ error: 'Challenge expired or invalid' });
-            }
-
-
-
-            try {
-                // Verify the registration response using @simplewebauthn/server
-                const verification = await verifyRegistrationResponse({
-                    response: request.body as RegistrationResponseJSON,
-                    expectedChallenge,
-                    expectedOrigin: process.env.FRONTEND_URL || 'https://localhost:3000',
-                    expectedRPID: process.env.DOMAIN || 'localhost',
-                    // attestationType: 'none',
-                    // authenticatorSelection: {
-                    //     userVerification: 'preferred'
-                    // },
-                });
-
-                if (verification.verified) {
-                    // Store the credential in the database
-                    const { id: credentialID, publicKey: credentialPublicKey } = verification.registrationInfo.credential;
-                    await pool.query(
-                        `INSERT INTO auth_methods (user_id, type, metadata) 
-                         VALUES ($1, $2, $3)`,
-                        [
-                            userId,
-                            'passkey',
-                            {
-                                credentialID: Buffer.from(credentialID).toString('base64url'),
-                                publicKey: Buffer.from(credentialPublicKey).toString('base64url'),
-                                name: (request.body as { name: string }).name,
-                            },
-                        ]
-                    );
-
-                    await redis.del(`passkey_challenge:${userId}`);
-                    reply.send({ verified: true });
-                } else {
-                    reply.code(400).send({ error: 'Registration failed' });
-                }
-            } catch (err) {
-                reply.code(400).send({ error: 'Invalid registration response' });
-            }
-        } catch (error) {
-            console.error('Passkey registration complete error:', error);
-            return reply.code(500).send({ error: 'Failed to complete registration' });
-        }
-    }
-});
-
-server.get('/api/auth/passkey', {
-    preHandler: [server.authenticate]
-}, async (request, reply) => {
-    try {
-        const { userId } = request.jwtUser;
-
-        const result = await pool.query(
-            `SELECT id, metadata, created_at 
-           FROM auth_methods 
-           WHERE user_id = $1 AND type = 'passkey'`,
-            [userId]
-        );
-
-        return reply.send(result.rows.map(row => ({
-            id: row.id,
-            credentialId: row.metadata.credentialID,
-            name: row.metadata.name,
-            createdAt: row.created_at,
-            lastUsed: row.metadata.lastUsed,
-        })));
-    } catch (error) {
-        console.error('Error fetching passkeys:', error);
-        return reply.code(500).send({
-            error: 'Failed to fetch passkeys',
-            details: error instanceof Error ? error.message : 'Unknown error'
-        });
-    }
-});
-
-server.delete('/api/auth/passkey/:credentialId', {
-    preHandler: [server.authenticate]
-}, async (request, reply) => {
-    const { userId } = request.jwtUser;
-    const { credentialId } = request.params as AuthMethodIdParam;
-    const formattedCredentialId = Buffer.from(credentialId, 'utf8');
-    const result = await pool.query(
-        'DELETE FROM auth_methods WHERE user_id = $1 AND type = $2 AND metadata->>\'credentialID\' = $3',
-        [userId, 'passkey', formattedCredentialId]
-    );
-    if (result.rowCount === 0) {
-        reply.code(404).send({ error: 'Passkey not found' });
-        return;
-    }
-    return { success: true };
-});
-
-server.get('/api/auth/authenticate', async (request, reply) => {
-    try {
-        // check if the request contains a valid JWT, and return the user if so
-        const token = request.headers.authorization?.replace('Bearer ', '');
-        if (!token) {
-            reply.code(401).send({ error: 'No token provided' });
-            return;
-        }
-        const user = await server.jwt.verify(token);
-        return { user };
-    } catch (err) {
-        reply.code(401).send({ error: 'Unauthorized' });
-    }
-});
-
-server.get('/api/auth/available-methods', async (request, reply) => {
-    const result = await pool.query('SELECT DISTINCT type FROM auth_methods');
-    return { methods: result.rows.map(row => row.type) };
-});
-
-server.post('/api/auth/password-reset', async (request, reply) => {
-    const { email } = request.body as { email: string };
-    try {
-        // 1) Validate user exists
-        const userResult = await pool.query(`SELECT id FROM users WHERE email = $1`, [email]);
-        if (userResult.rowCount === 0) {
-            // Do not reveal if the user doesn't exist (for privacy)
-            return reply.send({ success: true });
-        }
-        const userId = userResult.rows[0].id;
-
-        // 2) Generate token (like a random string)
-        const resetToken = generateUUID(); // or your random generator
-        // 3) Store token in DB or Redis with an expiration
-        await pool.query(
-            `INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1, $2, NOW() + INTERVAL '1 hour')`,
-            [userId, resetToken]
-        );
-
-        // 4) Email or otherwise deliver reset link
-        // e.g. sendMail(user.email, `Your reset link: ${FRONTEND_URL}/reset?token=${resetToken}`)
-
-        reply.send({ success: true });
-    } catch (err) {
-        reply.status(500).send({ error: 'Database error' });
-    }
-});
-
-server.post('/api/auth/password-reset/complete', async (request, reply) => {
-    const { token, newPassword } = request.body as { token: string; newPassword: string };
-
-    try {
-        // 1) Validate token
-        const prResult = await pool.query(
-            `SELECT user_id FROM password_resets WHERE token = $1 AND expires_at > NOW()`,
-            [token]
-        );
-        if (prResult.rowCount === 0) {
-            return reply.status(400).send({ error: 'Invalid or expired reset token' });
-        }
-        const userId = prResult.rows[0].user_id;
-
-        // 2) Hash new password
-        const hashedPassword = await argon2.hash(newPassword);
-
-        // 3) Update auth_methods
-        await pool.query(
-            `UPDATE auth_methods
-            SET hashed_password = $1
-          WHERE user_id = $2
-            AND type = 'password'`,
-            [hashedPassword, userId]
-        );
-
-        // 4) Invalidate or remove the used token
-        await pool.query(`DELETE FROM password_resets WHERE token = $1`, [token]);
-
-        reply.send({ success: true });
-    } catch (err) {
-        reply.status(500).send({ error: 'Database error' });
-    }
-});
-
-server.put('/api/auth/change-password', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { oldPassword, newPassword } = request.body as {
-            oldPassword: string;
-            newPassword: string;
-        };
-        const userId = request.jwtUser.userId;
-
-        console.log('changing password for user:', userId);
-
-        // Check if user has permission or if you rely solely on user matching
-        // E.g. if ( ! await hasPermission(userId, 'users.updateSelf') ) ...
-
-        try {
-            // 1) Get current hashed password
-            const authMethodRes = await pool.query(
-                `SELECT metadata FROM auth_methods 
-            WHERE user_id = $1 AND type = 'password'`,
-                [userId]
-            );
-            if (authMethodRes.rowCount === 0) {
-                return reply.status(400).send({ error: 'No password set' });
-            }
-            const currentHashedPassword = authMethodRes.rows[0].metadata;
-
-            // 2) Verify old password
-            const validOld = await argon2.verify(currentHashedPassword, oldPassword);
-            if (!validOld) {
-                return reply.status(401).send({ error: 'Incorrect old password' });
-            }
-
-            // 3) Hash new password
-            const newHashed = await argon2.hash(newPassword);
-            console.log(authMethodRes.rows[0].metadata, newHashed, validOld);
-
-            // 4) Update DB
-            await pool.query(
-                `UPDATE auth_methods SET metadata = $1::jsonb WHERE user_id = $2 AND type = 'password'`,
-                [JSON.stringify(newHashed), userId]
-            );
-            console.log('password changed');
-            reply.send({ success: true });
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-server.get('/api/auth/sessions', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        try {
-            const userId = request.jwtUser.userId;
-
-            // Get all sessions from Redis for this user
-            const sessions = [];
-            const keys = await redis.keys(`session:*`);
-
-            for (const key of keys) {
-                const storedUserId = await redis.get(key);
-                if (storedUserId === String(userId)) {
-                    // Get token from key (remove 'session:' prefix)
-                    const token = key.replace('session:', '');
-
-                    try {
-                        // Decode JWT to get device info
-                        const decoded = await decodeToken(token);
-
-                        // Add to sessions array if valid
-                        sessions.push({
-                            id: token,
-                            device: decoded.device || 'Unknown Device',
-                            browser: decoded.browser || 'Unknown Browser',
-                            location: decoded.location || 'Unknown Location',
-                            lastActive: decoded.iat ? new Date(decoded.iat * 1000).toISOString() : new Date().toISOString(),
-                            current: request.headers.authorization?.includes(token) || false
-                        });
-                    } catch (err) {
-                        // Skip invalid tokens
-                        continue;
-                    }
-                }
-            }
-
-            return { sessions };
-        } catch (error) {
-            reply.code(500).send({ error: 'Failed to fetch sessions' });
-        }
-    }
-});
-
-server.delete('/api/auth/sessions/:sessionId', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        try {
-            const { sessionId } = request.params as { sessionId: string };
-            const userId = request.jwtUser.userId;
-
-            // Check if session belongs to user
-            const storedUserId = await redis.get(`session:${sessionId}`);
-            if (!storedUserId || storedUserId !== String(userId)) {
-                return reply.code(403).send({ error: 'Session not found or unauthorized' });
-            }
-
-            // Remove session from Redis
-            await redis.del(`session:${sessionId}`);
-
-            return { success: true };
-        } catch (error) {
-            reply.code(500).send({ error: 'Failed to revoke session' });
-        }
-    }
-});
-
-server.delete('/api/auth/sessions', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        try {
-            const userId = request.jwtUser.userId;
-            const currentToken = request.headers.authorization?.replace('Bearer ', '');
-
-            // Get all sessions for user
-            const keys = await redis.keys('session:*');
-
-            for (const key of keys) {
-                const storedUserId = await redis.get(key);
-                const token = key.replace('session:', '');
-
-                // Skip current session and sessions not belonging to user
-                if (storedUserId === String(userId) && token !== currentToken) {
-                    await redis.del(key);
-                }
-            }
-
-            return { success: true };
-        } catch (error) {
-            reply.code(500).send({ error: 'Failed to revoke sessions' });
-        }
-    }
-});
-
-// Suppose you store active tokens in a 'sessions' table in Redis
-server.post('/api/auth/sessions/revoke', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const userId = request.jwtUser.userId;
-        // e.g. only Admin can revoke sessions
-        if (!(await hasPermission(String(userId), 'sessions.revoke'))) {
-            return reply.status(403).send({ error: 'Forbidden' });
-        }
-
-        const { tokenId } = request.body as { tokenId: string };
-
-        try {
-            await redis.del(`session:${tokenId}`);
-            reply.send({ success: true });
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-server.post('/api/auth/2fa/setup', { onRequest: [server.authenticate] }, async (request, reply) => {
-    try {
-        const { userId, email } = request.jwtUser;
-        const recovery_codes = Array.from({ length: 10 }, () => Math.floor(Math.random() * 1000000).toString().padStart(6, '0'));
-        const secret = authenticator.generateSecret();
-        const otpauth = authenticator.keyuri(email, process.env.APP_NAME, secret);
-        const qrCodeDataURL = await QRCode.toDataURL(otpauth);
-
-        await pool.query(
-            'INSERT INTO user_2fa (user_id, totp_secret, recovery_codes) VALUES ($1, $2, $3::jsonb)',
-            [userId, secret, JSON.stringify(recovery_codes)]
-        );
-
-        reply.send({ qrCodeDataURL, otpauth, recovery_codes });
-    } catch (error) {
-        console.error('2FA setup error:', error);
-        reply.code(500).send({ error: 'Failed to set up 2FA: ', details: error.message });
-    }
-});
-
-server.post<{ Body: { code: string } }>('/api/auth/2fa/verify', { onRequest: [server.authenticate] }, async (request, reply) => {
-    try {
-        const { userId } = request.jwtUser;
-        const { code } = request.body; // Only code is expected.
-        const result = await pool.query('SELECT totp_secret FROM user_2fa WHERE user_id = $1', [userId]);
-
-        if (result.rowCount === 0) {
-            return reply.code(404).send({ error: 'User not found' });
-        }
-        const totpSecret = result.rows[0].totp_secret;
-        console.log(totpSecret);
-        if (!totpSecret) {
-            return reply.code(400).send({ error: '2FA not set up for this user' });
-        }
-        const isValid = authenticator.check(code, totpSecret);
-        console.log('2FA verification result:', { code, totpSecret, isValid });
-        if (!isValid) {
-            return reply.code(400).send({ error: 'Invalid TOTP code' });
-        }
-        await pool.query('UPDATE users SET two_factor_enabled = TRUE WHERE id = $1', [userId]);
-        reply.send({ success: true });
-    } catch (error) {
-        console.log('2FA verification error:', error);
-        reply.code(500).send({ error: 'Failed to verify 2FA', details: error.message });
-    }
-});
-
-
-server.post('/api/auth/2fa/disable', { onRequest: [server.authenticate] }, async (request, reply) => {
-    try {
-        const { userId } = request.jwtUser!;
-        const { code } = request.body as { code: string };
-        console.log('Disabling 2FA for user:', userId, code);
-
-        // Verify the TOTP code before disabling
-        const result = await pool.query('SELECT totp_secret FROM user_2fa WHERE user_id = $1', [userId]);
-        if (result.rowCount === 0) {
-            return reply.code(404).send({ error: 'User not found' });
-        }
-        const { totp_secret } = result.rows[0];
-
-        const isValid = authenticator.check(code, totp_secret);
-        if (!isValid) {
-            console.error('Invalid TOTP code:', { code }, 'for user:', userId);
-            return reply.code(400).send({ error: 'Invalid TOTP code' });
-        }
-
-        // Disable 2FA and remove the secret
-        await pool.query('UPDATE users SET two_factor_enabled = FALSE WHERE id = $1', [userId]);
-        await pool.query('DELETE FROM user_2fa WHERE user_id = $1', [userId]);
-        console.log('2FA disabled for user:', userId);
-        reply.send({ success: true });
-    } catch (error) {
-        console.error('2FA disable error:', error);
-        reply.code(500).send({ error: 'Failed to disable 2FA', details: error.message });
-    }
-});
-
-server.post('/api/auth/2fa/login/verify', async (request, reply) => {
-    try {
-        // Expect a temporary token with pending2FA flag and a TOTP code.
-        const { tempToken, code } = request.body as { tempToken: string; code: string };
-
-        if (typeof tempToken !== 'string' || !tempToken) {
-            console.log('Invalid temporary token:', {tempToken});
-            return reply.code(400).send({ error: 'Invalid temporary token' });
-        }
-
-        // Verify the temporary token.
-        const payload = await verifyToken(tempToken);
-        if (!payload.pending2FA) {
-            console.log('Invalid temporary token:', {tempToken});
-            return reply.code(400).send({ error: 'Invalid token for 2FA verification' });
-        }
-        const userId = payload.userId;
-
-        // Fetch the user's TOTP secret.
-        const result = await pool.query('SELECT totp_secret, recovery_codes FROM user_2fa WHERE user_id = $1', [userId]);
-        if (result.rowCount === 0) {
-            return reply.code(404).send({ error: 'User not found' });
-        }
-        const totpSecret = result.rows[0].totp_secret;
-        let recovery_codes = result.rows[0].recovery_codes as string[];
-        console.log(result.rows[0].recovery_codes);
-        if (!totpSecret) {
-            console.log('2FA not set up for this user:', {userId});
-            return reply.code(400).send({ error: '2FA not set up for this user' });
-        }
-
-        // Verify the provided TOTP code.
-        console.log(recovery_codes);
-        const isValid = authenticator.check(code, totpSecret) || recovery_codes.includes(code);
-        if (!isValid) {
-            console.log('Invalid TOTP code:', {code});
-            return reply.code(400).send({ error: 'Invalid TOTP code' });
-        }
-
-        // If the code is valid, issue the final token.
-        const isAdmin = await hasRole(userId, 'admin');
-        const finalToken = await signToken(
-            {
-                userId: userId,
-                isAdmin,
-            }
-        );
-        await redis.set(`session:${finalToken}`, String(userId), { EX: 60 * 60 * 24 * 60 }); // 60 days
-
-        // if a recovery code was used, remove it from the list
-        if (recovery_codes.includes(code)) {
-            await pool.query(
-            'UPDATE user_2fa SET recovery_codes = $1 WHERE user_id = $2',
-            [JSON.stringify(recovery_codes.filter((rc: string) => rc !== code)), userId]
-            );
-        }
-
-        // Remove the temporary challenge (if any) from Redis.
-        // (Optional: you might remove a challenge key if you store one for login.)
-        reply.send({ success: true, token: finalToken });
-    } catch (error: any) {
-        console.error('2FA login verification error:', error);
-        reply.code(500).send({ error: error.message || 'Failed to verify 2FA' });
-    }
-});
-
-
-// Protected route example
-// server.get('/api/user', {
-//     onRequest: [server.authenticate],
-// }, async (request) => {
-//     const userId = request.user.userId;
-//     const result = await pool.query('SELECT id, email, name FROM users WHERE id = $1', [userId]);
-//     return result.rows[0];
+// server.post('/api/auth/register', async (request, reply) => {
+
+//     try {
+//         console.log('Received body data: ', request.body);
+//         const userBody = request.body as any;
+//         // parse verbosely using safeParse:
+//         const parseResult = UserSchema.safeParse({
+//             ...userBody,
+//             profile: {
+//                 ...userBody.profile,
+//                 dateOfBirth: new Date(userBody.profile.dateOfBirth)
+//             },
+//         });
+//         if (!parseResult.success) {
+//             console.error(parseResult.error);
+//             throw new Error('Invalid request data');
+//         }
+//         const body = parseResult.data;
+//         console.log('Parsed body:', body);
+
+//         // const body = UserSchema.parse(request.body);
+//         // generate pgp keypair for user federation
+//         const { publicKey, privateKey } = await openpgp.generateKey({
+//             userIDs: [{ name: body.profile.last_name, email: body.email }],
+//             type: 'ecc',
+//             curve: 'curve25519Legacy',
+//             format: 'armored'
+//         });
+
+//         const encryptedPrivateKey: EncryptedPayload = encryptPrivateKey(privateKey);
+
+//         const userId = await generateUUID();
+//         const insertFields = {
+//             id: userId,
+//             email: body.email,
+//             first_name: body.profile.first_name,
+//             last_name: body.profile.last_name,
+//             public_key: publicKey,
+//             private_key: encryptedPrivateKey,
+//             dateOfBirth: body.profile.dateOfBirth,
+//             phone_number: body.profile.phone,
+//             address: body.profile.address,
+//         };
+
+//         console.log('Inserting user:', insertFields);
+//         const columns = Object.keys(insertFields);
+//         const values = Object.values(insertFields);
+//         const placeholders = columns.map((_, i) => `$${i + 1}`);
+//         const query = `INSERT INTO users (${columns.join(
+//             ', '
+//         )}) VALUES (${placeholders.join(
+//             ', '
+//         )}) RETURNING id, email`;
+//         const result = await pool.query(query, values);
+
+//         if (body.password) {
+//             // check if password is already hashed (check if it starts with $argon2id)
+//             if (body.password.startsWith('$argon2id')) {
+//                 await pool.query(
+//                     'INSERT INTO auth_methods (user_id, type, metadata) VALUES ($1, $2, $3)',
+//                     [result.rows[0].id, 'password', body.password]
+//                 );
+//             } else {
+//                 // hash the password using argon2
+//                 const hashedPassword = await argon2.hash(body.password);
+//                 // use auth_methods table to store hashed password if set
+//                 await pool.query(
+//                     'INSERT INTO auth_methods (user_id, type, metadata) VALUES ($1, $2, $3)',
+//                     [result.rows[0].id, 'password', JSON.stringify(hashedPassword)]
+//                 );
+//             }
+//         }
+
+//         const token = await signToken(
+//             { userId: result.rows[0].id },
+//         );
+//         await redis.set(`session:${token}`, String(result.rows[0].id), {
+//             EX: 60 * 60 * 24 * 60 // 60 days;
+//         });
+
+//         reply
+//             .setCookie('checkpoint_jwt', token, {
+//                 httpOnly: true,
+//                 secure: process.env.NODE_ENV === 'production',
+//             })
+//             .send({ user: result.rows[0], token });
+//         // return { user: result.rows[0], token };
+//     } catch (err: any) {
+//         if (err.constraint === 'users_email_key') {
+//             reply.code(400);
+//             return { error: 'Email already exists' };
+//         } else if (err instanceof ZodError) {
+//             reply.code(400);
+//             return { error: 'Invalid request', details: err.issues };
+//         } else {
+//             throw err;
+//         }
+//     }
+// });
+
+// server.post<{ Body: { email: string } }>('/api/auth/passkey/login/start', async (request, reply) => {
+//     try {
+//         const { email } = request.body;
+
+//         // Ensure the user exists
+//         const userResult = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+//         if (userResult.rowCount === 0) {
+//             reply.code(400).send({ error: 'User does not exist.' });
+//             return;
+//         }
+//         const user = userResult.rows[0];
+
+//         // Retrieve stored passkey credentials for the user
+//         const credentialsResult = await pool.query(
+//             'SELECT metadata FROM auth_methods WHERE user_id = $1 AND type = $2',
+//             [user.id, 'passkey']
+//         );
+//         // const allowedCredentials = credentialsResult.rows.map((row) => {
+//         //     const metadata = row.metadata;
+//         //     return {
+//         //         id: String(metadata.credentialID),
+//         //         // transports: ['internal'] as unknown as AuthenticatorTransport[],
+//         //     };
+//         // });
+//         const allowedCredentials = [];
+
+//         // Generate authentication options for passkey login
+//         const options = await generateAuthenticationOptions({
+//             rpID,
+//             allowCredentials: allowedCredentials,
+//             userVerification: 'preferred',
+//         });
+
+//         // Store only the challenge in Redis for later verification
+//         await redis.set(`authentication_${user.id}`, options.challenge, { EX: 300 });
+//         reply.send(options);
+//     } catch (error) {
+//         console.error('Passkey login start error:', error);
+//         reply.code(500).send({
+//             error: 'Failed to start passkey login',
+//             details: error instanceof Error ? error.message : 'Unknown error'
+//         });
+//     }
 // });
 
 
-/*
-
-SSO ROUTES
-
-*/
-
-server.get('/api/sso', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        try {
-            const result = await pool.query(
-                'SELECT id, name, client_id, config, created_at FROM sso_providers'
-            );
-            reply.send(result.rows);
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-server.post('/api/sso', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { name, client_id, client_secret, config } = request.body as {
-            name: string;
-            client_id: string;
-            client_secret: string;
-            config?: any;
-        };
-
-        try {
-            const result = await pool.query(
-                `
-            INSERT INTO sso_providers (name, client_id, client_secret, config)
-                 VALUES ($1, $2, $3, COALESCE($4, '{}'))
-              RETURNING id, name, client_id, config, created_at
-          `,
-                [name, client_id, client_secret, config]
-            );
-            reply.send(result.rows[0]);
-        } catch (err: any) {
-            if (err.code === '23505') {
-                return reply.status(400).send({ error: 'SSO provider already exists' });
-            }
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-server.patch('/api/sso/:id', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { id } = request.params as ProviderIdParam;
-        const { name, client_id, client_secret, config } = request.body as {
-            name?: string;
-            client_id?: string;
-            client_secret?: string;
-            config?: any;
-        };
-
-        try {
-            const result = await pool.query(
-                `
-            UPDATE sso_providers
-               SET name          = COALESCE($1, name),
-                   client_id     = COALESCE($2, client_id),
-                   client_secret = COALESCE($3, client_secret),
-                   config        = COALESCE($4, config)
-             WHERE id = $5
-             RETURNING id, name, client_id, config, created_at
-          `,
-                [name, client_id, client_secret, config, id]
-            );
-            if (result.rowCount === 0) {
-                return reply.status(404).send({ error: 'SSO provider not found' });
-            }
-            reply.send(result.rows[0]);
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-server.delete('/api/sso/:id', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { id } = request.params as ProviderIdParam;
-        try {
-            const result = await pool.query(
-                'DELETE FROM sso_providers WHERE id = $1 RETURNING id',
-                [id]
-            );
-            if (result.rowCount === 0) {
-                return reply.status(404).send({ error: 'SSO provider not found' });
-            }
-            reply.send({ success: true, providerId: id });
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-server.get('/api/auth/sso/google', passport.authenticate('google', {
-    scope: ['profile', 'email']
-}));
-
-server.get('/api/auth/sso/google/callback', {
-    preHandler: passport.authenticate('google', { session: false }),
-    handler: async (request, reply) => {
-        const user = request.user as { id: string; email?: string };
-
-        // 3) Create your own JWT
-        const isAdmin = await hasRole(user.id, 'admin');
-
-        // Sign and return a JWT token
-        const token = await signToken(
-            {
-                userId: user.id,
-                isAdmin,
-            },
-        );
-        await redis.set(`session:${token}`, String(user.id), {
-            EX: 60 * 60 * 24 * 60 // 60 days;
-        });
-
-        // 4) Set it as an HTTP-only cookie
-        reply.setCookie('checkpoint_jwt', token, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'none', // if the frontend is a different domain
-            path: '/',
-            // maxAge: 3600, // optional: 1 hour
-        });
-
-        // 5) Redirect the user to your frontend, WITHOUT the token
-        //    in the URL. "server-to-server" exchange is done.
-        reply.redirect(`${process.env.FRONTEND_URL}/dashboard`);
-    }
-});
-
-server.get('/api/auth/sso/line',
-    passport.authenticate('line', {
-        scope: ['profile', 'openid', 'email']
-    })
-);
-
-server.get('/api/auth/sso/line/callback', {
-    preHandler: passport.authenticate('line', { session: false }),
-    handler: async (request, reply) => {
-        const user = request.user as PassportUser;
-
-        const rolesRes = await pool.query(
-            `SELECT r.name 
-        FROM user_roles ur
-        JOIN roles r ON ur.role_id = r.id
-        WHERE ur.user_id = $1`,
-            [user.id]
-        );
-        const roles = rolesRes.rows.map(row => row.name);
-        const isAdmin = roles.includes('admin');
-
-        // Sign and return a JWT token
-        const token = await signToken(
-            { userId: user.id, isAdmin },
-        );
-        await redis.set(`session:${token}`, String(user.id), {
-            EX: 60 * 60 * 24 * 60 // 60 days;
-        });
-
-        reply.setCookie('checkpoint_jwt', token, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'none',
-        });
-
-        // Redirect to frontend with token
-        reply.redirect(`${process.env.FRONTEND_URL}/auth/callback?token=${token}`);
-    }
-});
-
-/*
-/auth/users
-
-Handles all user-related routes
-*/
-
-server.get('/api/users/exists', {
-    handler: async (request, reply) => {
-        const { email } = request.query as { email: string };
-        const result = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
-        return { exists: result.rowCount > 0 };
-    },
-});
-
-// get all users
-server.get('/api/users', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        try {
-            // If you want to restrict this to admins, do an additional check here:
-            console.log(`Received request from user ${request.jwtUser.userId} on route GET /api/users`);
-            const canSearch = await hasPermission(String(request.jwtUser.userId), 'users.search');
-            if (canSearch) {
-                console.log('User has permission to search users');
-            } else {
-                console.log('User does not have permission to search users');
-                return reply.status(403).send({ error: 'Forbidden' });
-            }
-
-            const { search, page = 1, pageSize = 10 } = request.query as {
-                search?: string;
-                page?: number;
-                pageSize?: number;
-            };
-            const offset = (page - 1) * pageSize;
-            const likeQuery = `%${search || ''}%`;
-
-            try {
-                const result = await pool.query(
-                    `
-                    SELECT *
-                        FROM users
-                    WHERE email ILIKE $1
-                        OR first_name ILIKE $1
-                        OR last_name ILIKE $1
-                    ORDER BY created_at DESC
-                    LIMIT $2 OFFSET $3
-                    `,
-                    [likeQuery, pageSize, offset]
-                );
-                // for each result, parse each row as UserSchema then add to outgoing array
-                console.log(result.rows);
-                const _outgoing = result.rows.map((row) => {
-                    let json_encoded_address = JSON.parse(row.address);
-                    let parsedResult = {
-                        id: row.id,
-                        email: row.email,
-                        public_key: row.public_key,
-                        created_at: row.created_at,
-                        two_factor_enabled: row.two_factor_enabled,
-                        profile: {
-                            first_name: row.first_name,
-                            last_name: row.last_name,
-                            profile_picture: row.profile_picture || '',
-                            dateOfBirth: row.dateofbirth,
-                            phone: row.phone_number,
-                            address: json_encoded_address,
-                        },
-                    };
-                    return UserSchema.parse(parsedResult);
-                });
-                // console.log(_outgoing);
-                reply.send(_outgoing);
-            } catch (err) {
-                reply.status(500).send({ error: 'Database error' });
-            }
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-// get user's profile
-server.get('/api/users/:id', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { id } = request.params as { id: string };
-        try {
-            // only allow users to view their own profile, or admins to view any profile
-            if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
-                return reply.status(403).send({ error: 'Forbidden' });
-            }
-
-            const result = await pool.query(
-                'SELECT * FROM users WHERE id = $1',
-                [id]
-            );
-            console.log(result.rows[0]);
-            // console.log(result.rows[0]);
-            let json_encoded_address = JSON.parse(result.rows[0].address);
-            let parsedResult = {
-                id: result.rows[0].id,
-                email: result.rows[0].email,
-                public_key: result.rows[0].public_key,
-                created_at: result.rows[0].created_at,
-                two_factor_enabled: result.rows[0].two_factor_enabled,
-                profile: {
-                    first_name: result.rows[0].first_name,
-                    last_name: result.rows[0].last_name,
-                    profile_picture: result.rows[0].profile_picture || '',
-                    dateOfBirth: result.rows[0].dateofbirth,
-                    phone: result.rows[0].phone_number,
-                    address: json_encoded_address,
-                },
-            };
-            let outgoing_ = UserSchema.parse(parsedResult);
-            console.log(outgoing_);
-
-            // get date time last changed password
-            const password_changed_at = await pool.query(
-                'SELECT created_at FROM auth_methods WHERE user_id = $1 AND type = $2',
-                [id, 'password']
-            );
-
-            // store last password change date in the first row
-            outgoing_.password_changed_at = password_changed_at.rows[0]?.created_at;
-
-            if (!outgoing_) {
-                return reply.status(404).send({ error: 'User not found' });
-            }
-            reply.send(outgoing_);
-        } catch (err) {
-            reply.status(500).send({ message: 'An error occurred: ' + err });
-        }
-    },
-});
-
-// update user's profile
-server.put('/api/users/:id', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { id } = request.params as { id: string };
-        const toUpdate = UserSchema.parse(request.body);
-
-        try {
-            if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
-                return reply.status(403).send({ error: 'Forbidden' });
-            }
-
-            const result = await pool.query(
-                'UPDATE users SET email = $1, first_name = $2, last_name = $3 WHERE id = $4 RETURNING *',
-                [toUpdate.email, toUpdate.profile.first_name, toUpdate.profile.last_name, id]
-            );
-            if (result.rowCount === 0) {
-                return reply.status(404).send({ error: 'User not found' });
-            }
-            reply.send(result.rows[0]);
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        };
-    }
-});
-
-// delete user
-
-server.delete('/api/users/:id', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { id } = request.params as { id: string };
-        // const requester_permissions = getUserPermissions(String(request.jwtUser.userId));
-        try {
-            // allow user to delete their own account, or an admin to delete any account
-            if (request.jwtUser.userId !== id && !hasPermission(String(request.jwtUser.userId), 'users.delete')) {
-                return reply.status(403).send({ error: 'Forbidden' });
-            }
-
-            const result = await pool.query(
-                'DELETE FROM users WHERE id = $1 RETURNING id',
-                [id]
-            );
-            if (result.rowCount === 0) {
-                return reply.status(404).send({ error: 'User not found' });
-            }
-            reply.send({ success: true, userId: id });
-        } catch (err) {
-            console.log(err);
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-// get user's auth methods
-server.get('/api/users/:id/auth-methods', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { id } = request.params as { id: string };
-        try {
-            if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
-                return reply.status(403).send({ error: 'Forbidden' });
-            }
-
-            const result = await pool.query(
-                `
-            SELECT id, type, is_preferred, metadata, created_at, last_used_at
-              FROM auth_methods
-             WHERE user_id = $1
-          `,
-                [id]
-            );
-            reply.send(result.rows);
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-// add auth method to user
-server.post('/api/users/:id/auth-methods', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { id } = request.params as { id: string };
-        const { type, is_preferred, metadata } = request.body as {
-            type: 'password' | 'passkey' | 'biometric' | 'sso';
-            is_preferred?: boolean;
-            metadata?: any;
-        };
-
-        try {
-            if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
-                return reply.status(403).send({ error: 'Forbidden' });
-            }
-
-            const result = await pool.query(
-                `
-            INSERT INTO auth_methods (user_id, type, is_preferred, metadata)
-                 VALUES ($1, $2, COALESCE($3, false), COALESCE($4, '{}'))
-              RETURNING id, type, is_preferred, metadata, created_at, last_used_at
-          `,
-                [id, type, is_preferred, metadata]
-            );
-            reply.send(result.rows[0]);
-        } catch (err: any) {
-            if (err.code === '23503') {
-                return reply.status(404).send({ error: 'User not found' });
-            }
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-// update auth method
-server.get('/api/users/:id/sso', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { id } = request.params as { id: string };
-        try {
-            // if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
-            //   return reply.status(403).send({ error: 'Forbidden' });
-            // }
-
-            const result = await pool.query(
-                `
-            SELECT usc.id,
-                   usc.provider_id,
-                   sp.name as provider_name,
-                   usc.external_user_id,
-                   usc.created_at
-              FROM user_sso_connections usc
-              JOIN sso_providers sp ON usc.provider_id = sp.id
-             WHERE usc.user_id = $1
-          `,
-                [id]
-            );
-            reply.send(result.rows);
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-// add sso connection to user
-server.post('/api/users/:id/sso', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { id } = request.params as UserIdParam;
-        const { provider_id, external_user_id } = request.body as SsoConnectionBody;
-
-        try {
-            // if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
-            //   return reply.status(403).send({ error: 'Forbidden' });
-            // }
-
-            const result = await pool.query(
-                `
-            INSERT INTO user_sso_connections (user_id, provider_id, external_user_id)
-                 VALUES ($1, $2, $3)
-              RETURNING id, user_id, provider_id, external_user_id, created_at
-          `,
-                [id, provider_id, external_user_id]
-            );
-            reply.send(result.rows[0]);
-        } catch (err: any) {
-            if (err.code === '23503') {
-                // foreign key violation for user or provider
-                return reply.status(404).send({ error: 'User or provider not found' });
-            }
-            if (err.code === '23505') {
-                // unique (provider_id, external_user_id)
-                return reply.status(400).send({ error: 'This SSO connection already exists' });
-            }
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-// add role to user
-server.post('/api/users/:id/role', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { id } = request.params as UserIdParam;
-        const { roleId } = request.body as RoleIdBody;
-
-        try {
-            if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
-                return reply.status(403).send({ error: 'Forbidden' });
-            }
-
-            await pool.query(
-                `
-            INSERT INTO user_roles (user_id, role_id)
-                 VALUES ($1, $2)
-            ON CONFLICT (user_id, role_id) DO NOTHING
-          `,
-                [id, roleId]
-            );
-            reply.send({ success: true });
-        } catch (err: any) {
-            if (err.code === '23503') {
-                // foreign key violation for user or role
-                return reply.status(404).send({ error: 'User or role not found' });
-            }
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-// remove role from user
-server.delete('/api/users/:id/role', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { id } = request.params as UserIdParam;
-        const { roleId } = request.body as RoleIdBody;
-
-        try {
-            if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
-                return reply.status(403).send({ error: 'Forbidden' });
-            }
-
-            const result = await pool.query(
-                'DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2 RETURNING user_id, role_id',
-                [id, roleId]
-            );
-            if (result.rowCount === 0) {
-                return reply.status(404).send({ error: 'User or role not found' });
-            }
-            reply.send({ success: true });
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-// get user's roles
-server.get('/api/users/:id/roles', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { id } = request.params as UserIdParam;
-        try {
-            if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
-                return reply.status(403).send({ error: 'Forbidden' });
-            }
-
-            const result = await pool.query(
-                `
-            SELECT r.id, r.name, r.description
-              FROM user_roles ur
-              JOIN roles r ON ur.role_id = r.id
-             WHERE ur.user_id = $1
-          `,
-                [id]
-            );
-            reply.send(result.rows);
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-// user profile picture
-
-server.post('/api/users/:id/profile-picture', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { id } = request.params as UserIdParam;
-        const files = await request.files();
-        const file = files[0];  // Get first uploaded file
-        if (!file) {
-            return reply.status(400).send({ error: 'No file uploaded' });
-        }
-
-        // Read file buffer
-        const buffer = await file.toBuffer();
-
-        // Convert to base64 string for storage
-        const profile_picture = buffer.toString('base64');
-
-        try {
-            if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
-                return reply.status(403).send({ error: 'Forbidden' });
-            }
-
-            const result = await pool.query(
-                'UPDATE users SET profile_picture = $1 WHERE id = $2 RETURNING id, profile_picture',
-                [profile_picture, id]
-            );
-            if (result.rowCount === 0) {
-                return reply.status(404).send({ error: 'User not found' });
-            } else {
-                // save the image to the file system
-                try {
-                    fs.writeFileSync(`../public/profile_images/${id}.png`, buffer);
-                } catch (err) {
-                    console.error(err);
-                    return reply.status(500).send({ error: 'Failed to save image' });
-                }
-            }
-            reply.send(result.rows[0]);
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-// get user's profile picture
-server.get('/api/users/:id/profile-picture', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { id } = request.params as UserIdParam;
-        try {
-            const result = await pool.query(
-                'SELECT profile_picture FROM users WHERE id = $1',
-                [id]
-            );
-            if (result.rowCount === 0) {
-                return reply.status(404).send({ error: 'User not found' });
-            }
-            const profile_picture = result.rows[0].profile_picture;
-            if (!profile_picture) {
-                return reply.status(404).send({ error: 'Profile picture not found' });
-            }
-            reply.send({ profile_picture });
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-// update user's profile picture
-server.put('/api/users/:id/profile-picture', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { id } = request.params as UserIdParam;
-        const files = await request.files();
-        const file = files[0];  // Get first uploaded file
-        if (!file) {
-            return reply.status(400).send({ error: 'No file uploaded' });
-        }
-
-        // Read file buffer
-        const buffer = await file.toBuffer();
-
-        // Convert to base64 string for storage
-        const profile_picture = buffer.toString('base64');
-
-        try {
-            if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
-                return reply.status(403).send({ error: 'Forbidden' });
-            }
-
-            const result = await pool.query(
-                'UPDATE users SET profile_picture = $1 WHERE id = $2 RETURNING id, profile_picture',
-                [profile_picture, id]
-            );
-            if (result.rowCount === 0) {
-                return reply.status(404).send({ error: 'User not found' });
-            } else {
-                // save the image to the file system
-                try {
-                    fs.writeFileSync(`../public/profile_images/${id}.png`, buffer);
-                } catch (err) {
-                    console.error(err);
-                    return reply.status(500).send({ error: 'Failed to save image' });
-                }
-            }
-            reply.send(result.rows[0]);
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-// delete user's profile picture
-server.delete('/api/users/:id/profile-picture', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { id } = request.params as UserIdParam;
-        try {
-            if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
-                return reply.status(403).send({ error: 'Forbidden' });
-            }
-
-            const result = await pool.query(
-                'UPDATE users SET profile_picture = NULL WHERE id = $1 RETURNING id',
-                [id]
-            );
-            if (result.rowCount === 0) {
-                return reply.status(404).send({ error: 'User not found' });
-            } else {
-                // delete the image from the file system
-                try {
-                    fs.unlinkSync(`../public/profile_images/${id}.png`);
-                } catch (err) {
-                    console.error(err);
-                    return reply.status(500).send({ error: 'Failed to delete image' });
-                }
-            }
-            reply.send({ success: true });
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-/*
-
-ROLES ROUTES
-
-*/
-
-server.get('/api/roles', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        try {
-            const result = await pool.query('SELECT id, name, permissions, icon, description FROM roles');
-            reply.send(result.rows);
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-server.post('/api/roles', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { name, description, permissions, icon } = request.body as {
-            name: string;
-            description?: string;
-            permissions?: string[];
-            icon?: string;
-        };
-        try {
-            const result = await pool.query(
-                `
-            INSERT INTO roles (name, description, permissions, icon)
-             VALUES ($1, $2, $3, $4)
-              RETURNING id, name, permissions, icon, description
-          `,
-                [name, description ?? null, permissions ?? [], icon ?? null]
-            );
-            reply.send(result.rows[0]);
-        } catch (err: any) {
-            if (err.code === '23505') {
-                return reply.status(400).send({ error: 'Role name already exists' });
-            }
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-server.post('/api/roles/:roleId/permissions', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const userId = request.jwtUser.userId;
-        // Only an admin can do this
-        if (!(await hasPermission(String(userId), 'roles.update'))) {
-            return reply.status(403).send({ error: 'Forbidden' });
-        }
-
-        const { roleId } = request.params as { roleId: string };
-        const { permissionsToAdd } = request.body as { permissionsToAdd: string[] };
-
-        try {
-            // 1) Get current permissions from DB
-            const rRes = await pool.query(`SELECT permissions FROM roles WHERE id = $1`, [roleId]);
-            if (rRes.rowCount === 0) {
-                return reply.status(404).send({ error: 'Role not found' });
-            }
-            let perms = rRes.rows[0].permissions || [];
-            // 2) Merge in the new perms
-            perms = Array.from(new Set([...perms, ...permissionsToAdd])); // deduplicate
-            // 3) Update
-            await pool.query(`UPDATE roles SET permissions = $1 WHERE id = $2`, [JSON.stringify(perms), roleId]);
-            reply.send({ success: true, updatedPermissions: perms });
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-
-
-/*
-
-AUTH METHODS ROUTES
-
-*/
-
-server.patch('/api/auth-methods/:authMethodId', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { authMethodId } = request.params as AuthMethodIdParam;
-        const { is_preferred, metadata } = request.body as {
-            is_preferred?: boolean;
-            metadata?: any;
-        };
-
-        try {
-            const result = await pool.query(
-                `
-            UPDATE auth_methods
-               SET is_preferred = COALESCE($1, is_preferred),
-                   metadata = COALESCE($2, metadata)
-             WHERE id = $3
-             RETURNING id, user_id, type, is_preferred, metadata, created_at, last_used_at
-          `,
-                [is_preferred, metadata, authMethodId]
-            );
-            if (result.rowCount === 0) {
-                return reply.status(404).send({ error: 'Auth method not found' });
-            }
-            reply.send(result.rows[0]);
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-// (2.4) DELETE AN AUTH METHOD
-server.delete('/api/auth-methods/:authMethodId', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        const { authMethodId } = request.params as AuthMethodIdParam;
-        try {
-            const result = await pool.query(
-                'DELETE FROM auth_methods WHERE id = $1 RETURNING id',
-                [authMethodId]
-            );
-            if (result.rowCount === 0) {
-                return reply.status(404).send({ error: 'Auth method not found' });
-            }
-            reply.send({ success: true, authMethodId });
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
-
-/*
-
-AUDIT LOGS ROUTES
-
-*/
-
-server.get('/api/audit-logs', {
-    onRequest: [server.authenticate],
-    handler: async (request, reply) => {
-        try {
-            // Possibly check if request.jwtUser.isAdmin
-
-            const result = await pool.query(
-                `
-            SELECT al.id,
-                   al.user_id,
-                   al.action,
-                   al.details,
-                   al.created_at,
-                   u.email as user_email
-              FROM audit_logs al
-         LEFT JOIN users u ON al.user_id = u.id
-          ORDER BY al.created_at DESC
-          `
-            );
-            reply.send(result.rows);
-        } catch (err) {
-            reply.status(500).send({ error: 'Database error' });
-        }
-    },
-});
+// server.post<{ Body: { email: string, response: AuthenticationResponseJSON } }>('/api/auth/passkey/login/complete', async (request, reply) => {
+//     const { email, response } = request.body;
+
+//     // Ensure the user exists
+//     const userResult = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+//     if (userResult.rowCount === 0) {
+//         console.log('User does not exist:', email);
+//         reply.code(400).send({ error: 'User does not exist.' });
+//         return;
+//     }
+//     const user = userResult.rows[0];
+
+//     // Retrieve the expected challenge from Redis
+//     const expectedChallenge = await redis.get(`authentication_${user.id}`);
+//     if (!expectedChallenge) {
+//         console.log('Authentication session expired or invalid:', user.id);
+//         reply.code(400).send({ error: 'Authentication session expired or invalid.' });
+//         return;
+//     }
+
+//     try {
+//         if (!response || !response.id) {
+//             reply.code(400).send({ error: 'Missing credential id in response' });
+//             return;
+//         }
+
+//         console.log('Raw credential id:', response.id);
+//         const normalizedCredentialId = Buffer.from(response.id).toString('base64url');
+//         console.log('Normalized credential id:', normalizedCredentialId);
+
+//         // Get the credential info from auth_methods
+//         const credentialResult = await pool.query(
+//             'SELECT metadata FROM auth_methods WHERE user_id = $1 AND type = $2 AND metadata->>\'credentialID\' = $3',
+//             [user.id, 'passkey', normalizedCredentialId]
+//         );
+//         if (credentialResult.rowCount === 0) {
+//             reply.code(400).send({ error: 'Invalid credential provided.' });
+//             return;
+//         }
+//         const storedCredential = credentialResult.rows[0].metadata;
+
+//         // Verify the authentication response using @simplewebauthn/server
+//         const verification = await verifyAuthenticationResponse({
+//             response,
+//             expectedChallenge,
+//             expectedOrigin: process.env.FRONTEND_URL || 'https://localhost:3000',
+//             expectedRPID: process.env.DOMAIN || 'localhost',
+//             credential: {
+//                 id: response.id,
+//                 publicKey: isoBase64URL.toBuffer(storedCredential.publicKey),
+//                 counter: storedCredential.counter,
+//                 transports: ['internal'],
+//             }
+//         });
+
+//         if (verification.verified) {
+//             console.log('Passkey authentication successful:', verification);
+//             // Optionally update the credential counter here if needed
+
+//             const isAdmin = await hasRole(user.id, 'admin');
+
+//             const token = await signToken(
+//                 {
+//                     userId: user.id,
+//                     isAdmin,
+//                 }
+//             );
+
+//             await redis.set(`session:${token}`, String(user.id), {
+//                 EX: 60 * 60 * 24 * 60 // 60 days
+//             });
+
+//             // Remove the used challenge from Redis
+//             await redis.del(`authentication_${user.id}`);
+
+
+//             reply
+//                 .setCookie('checkpoint_jwt', token, {
+//                     httpOnly: true,
+//                     secure: process.env.NODE_ENV === 'production',
+//                 })
+//                 .send({ success: true, token });
+//             // reply.send({success: true, token });
+//         } else {
+//             reply.code(400).send({ error: 'Authentication failed.' });
+//             console.log('Authentication failed:', verification);
+//         }
+//     } catch (err) {
+//         console.error('Passkey error:', err);
+//         reply.code(400).send({ error: 'Invalid authentication response.' });
+//     }
+// });
+
+// server.post('/api/auth/passkey/register/start', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         try {
+//             const { userId } = request.jwtUser; // Get the authenticated user's ID
+//             const { name } = request.body as { name: string };
+
+//             if (!name) {
+//                 return reply.code(400).send({ error: 'Name is required' });
+//             }
+
+//             // Get user from database
+//             const userResult = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
+//             if (userResult.rowCount === 0) {
+//                 return reply.code(404).send({ error: 'User not found' });
+//             }
+//             const user = userResult.rows[0];
+
+//             const userIdBuffer = stringToBuffer(user.id);
+
+//             console.log('Generating registration options...');
+
+//             // Generate registration options
+//             const options = await generateRegistrationOptions({
+//                 rpName: 'Checkpoint',
+//                 rpID: process.env.DOMAIN || 'localhost',
+//                 userID: userIdBuffer,
+//                 userName: user.email,
+//                 attestationType: 'none',
+//                 authenticatorSelection: {
+//                     residentKey: 'preferred',
+//                     userVerification: 'preferred',
+//                     authenticatorAttachment: 'platform',
+//                 },
+//             });
+
+//             console.log('Generated options:', options);
+
+//             // Store challenge in Redis for verification later
+//             await redis.set(
+//                 `passkey_challenge:${user.id}`,
+//                 options.challenge,
+//                 { EX: 300 } // 5 minute expiration
+//             );
+
+//             return reply.send(options);
+//         } catch (error) {
+//             console.error('Passkey registration start error:', error);
+//             return reply.code(500).send({
+//                 error: 'Failed to start registration',
+//                 details: error instanceof Error ? error.message : 'Unknown error'
+//             });
+//         }
+//     }
+// });
+
+// server.options('/api/auth/passkey/register/start', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+
+//         const { userId } = request.jwtUser; // Get the authenticated user's ID
+//         const { name } = request.body as { name: string };
+
+//         // Get user from database
+//         const userResult = await pool.query('SELECT * FROM users WHERE id = $1', [userId]);
+//         if (userResult.rowCount === 0) {
+//             return reply.code(404).send({ error: 'User not found' });
+//         }
+//         const user = userResult.rows[0];
+//         // send passkey registration options
+//         const options = await generateRegistrationOptions({
+//             rpName: 'Your App Name',
+//             rpID: process.env.DOMAIN || 'localhost',
+//             userID: user.id,
+//             userName: user.email,
+//             attestationType: 'none',
+//             authenticatorSelection: {
+//                 residentKey: 'preferred',
+//                 userVerification: 'preferred',
+//                 authenticatorAttachment: 'platform',
+//             },
+//         });
+
+//     }
+// });
+
+// server.post('/api/auth/passkey/register/complete', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         try {
+//             const { userId } = request.jwtUser;
+//             const expectedChallenge = await redis.get(`passkey_challenge:${userId}`);
+//             if (!expectedChallenge) {
+//                 return reply.code(400).send({ error: 'Challenge expired or invalid' });
+//             }
+
+
+
+//             try {
+//                 // Verify the registration response using @simplewebauthn/server
+//                 const verification = await verifyRegistrationResponse({
+//                     response: request.body as RegistrationResponseJSON,
+//                     expectedChallenge,
+//                     expectedOrigin: process.env.FRONTEND_URL || 'https://localhost:3000',
+//                     expectedRPID: process.env.DOMAIN || 'localhost',
+//                     // attestationType: 'none',
+//                     // authenticatorSelection: {
+//                     //     userVerification: 'preferred'
+//                     // },
+//                 });
+
+//                 if (verification.verified) {
+//                     // Store the credential in the database
+//                     const { id: credentialID, publicKey: credentialPublicKey } = verification.registrationInfo.credential;
+//                     await pool.query(
+//                         `INSERT INTO auth_methods (user_id, type, metadata) 
+//                          VALUES ($1, $2, $3)`,
+//                         [
+//                             userId,
+//                             'passkey',
+//                             {
+//                                 credentialID: Buffer.from(credentialID).toString('base64url'),
+//                                 publicKey: Buffer.from(credentialPublicKey).toString('base64url'),
+//                                 name: (request.body as { name: string }).name,
+//                             },
+//                         ]
+//                     );
+
+//                     await redis.del(`passkey_challenge:${userId}`);
+//                     reply.send({ verified: true });
+//                 } else {
+//                     reply.code(400).send({ error: 'Registration failed' });
+//                 }
+//             } catch (err) {
+//                 reply.code(400).send({ error: 'Invalid registration response' });
+//             }
+//         } catch (error) {
+//             console.error('Passkey registration complete error:', error);
+//             return reply.code(500).send({ error: 'Failed to complete registration' });
+//         }
+//     }
+// });
+
+// server.get('/api/auth/passkey', {
+//     preHandler: [server.authenticate]
+// }, async (request, reply) => {
+//     try {
+//         const { userId } = request.jwtUser;
+
+//         const result = await pool.query(
+//             `SELECT id, metadata, created_at 
+//            FROM auth_methods 
+//            WHERE user_id = $1 AND type = 'passkey'`,
+//             [userId]
+//         );
+
+//         return reply.send(result.rows.map(row => ({
+//             id: row.id,
+//             credentialId: row.metadata.credentialID,
+//             name: row.metadata.name,
+//             createdAt: row.created_at,
+//             lastUsed: row.metadata.lastUsed,
+//         })));
+//     } catch (error) {
+//         console.error('Error fetching passkeys:', error);
+//         return reply.code(500).send({
+//             error: 'Failed to fetch passkeys',
+//             details: error instanceof Error ? error.message : 'Unknown error'
+//         });
+//     }
+// });
+
+// server.delete('/api/auth/passkey/:credentialId', {
+//     preHandler: [server.authenticate]
+// }, async (request, reply) => {
+//     const { userId } = request.jwtUser;
+//     const { credentialId } = request.params as AuthMethodIdParam;
+//     const formattedCredentialId = Buffer.from(credentialId, 'utf8');
+//     const result = await pool.query(
+//         'DELETE FROM auth_methods WHERE user_id = $1 AND type = $2 AND metadata->>\'credentialID\' = $3',
+//         [userId, 'passkey', formattedCredentialId]
+//     );
+//     if (result.rowCount === 0) {
+//         reply.code(404).send({ error: 'Passkey not found' });
+//         return;
+//     }
+//     return { success: true };
+// });
+
+// server.get('/api/auth/authenticate', async (request, reply) => {
+//     try {
+//         // check if the request contains a valid JWT, and return the user if so
+//         const token = request.headers.authorization?.replace('Bearer ', '');
+//         if (!token) {
+//             reply.code(401).send({ error: 'No token provided' });
+//             return;
+//         }
+//         const user = await server.jwt.verify(token);
+//         return { user };
+//     } catch (err) {
+//         reply.code(401).send({ error: 'Unauthorized' });
+//     }
+// });
+
+// server.get('/api/auth/available-methods', async (request, reply) => {
+//     const result = await pool.query('SELECT DISTINCT type FROM auth_methods');
+//     return { methods: result.rows.map(row => row.type) };
+// });
+
+// server.post('/api/auth/password-reset', async (request, reply) => {
+//     const { email } = request.body as { email: string };
+//     try {
+//         // Validate user exists
+//         const userResult = await pool.query(`SELECT id FROM users WHERE email = $1`, [email]);
+//         if (userResult.rowCount === 0) {
+//             // Do not reveal if the user doesn't exist (for privacy)
+//             return reply.send({ success: true });
+//         }
+//         const userId = userResult.rows[0].id;
+
+//         // Generate token (like a random string)
+//         const resetToken = generateUUID(); // or your random generator
+//         // Store token in DB or Redis with an expiration
+//         await pool.query(
+//             `INSERT INTO password_resets (user_id, token, expires_at) VALUES ($1, $2, NOW() + INTERVAL '1 hour')`,
+//             [userId, resetToken]
+//         );
+
+//         // Email or otherwise deliver reset link
+//         // e.g. sendMail(user.email, `Your reset link: ${FRONTEND_URL}/reset?token=${resetToken}`)
+
+//         reply.send({ success: true });
+//     } catch (err) {
+//         reply.status(500).send({ error: 'Database error' });
+//     }
+// });
+
+// server.post('/api/auth/password-reset/complete', async (request, reply) => {
+//     const { token, newPassword } = request.body as { token: string; newPassword: string };
+
+//     try {
+//         // Validate token
+//         const prResult = await pool.query(
+//             `SELECT user_id FROM password_resets WHERE token = $1 AND expires_at > NOW()`,
+//             [token]
+//         );
+//         if (prResult.rowCount === 0) {
+//             return reply.status(400).send({ error: 'Invalid or expired reset token' });
+//         }
+//         const userId = prResult.rows[0].user_id;
+
+//         // Hash new password
+//         const hashedPassword = await argon2.hash(newPassword);
+
+//         // Update auth_methods
+//         await pool.query(
+//             `UPDATE auth_methods
+//             SET hashed_password = $1
+//           WHERE user_id = $2
+//             AND type = 'password'`,
+//             [hashedPassword, userId]
+//         );
+
+//         // Invalidate or remove the used token
+//         await pool.query(`DELETE FROM password_resets WHERE token = $1`, [token]);
+
+//         reply.send({ success: true });
+//     } catch (err) {
+//         reply.status(500).send({ error: 'Database error' });
+//     }
+// });
+
+// server.put('/api/auth/change-password', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { oldPassword, newPassword } = request.body as {
+//             oldPassword: string;
+//             newPassword: string;
+//         };
+//         const userId = request.jwtUser.userId;
+
+//         console.log('changing password for user:', userId);
+
+//         try {
+//             // Get current hashed password
+//             const authMethodRes = await pool.query(
+//                 `SELECT metadata FROM auth_methods 
+//             WHERE user_id = $1 AND type = 'password'`,
+//                 [userId]
+//             );
+//             if (authMethodRes.rowCount === 0) {
+//                 return reply.status(400).send({ error: 'No password set' });
+//             }
+//             const currentHashedPassword = authMethodRes.rows[0].metadata;
+
+//             // Verify old password
+//             const validOld = await argon2.verify(currentHashedPassword, oldPassword);
+//             if (!validOld) {
+//                 return reply.status(401).send({ error: 'Incorrect old password' });
+//             }
+
+//             // Hash new password
+//             const newHashed = await argon2.hash(newPassword);
+//             console.log(authMethodRes.rows[0].metadata, newHashed, validOld);
+
+//             // Update DB
+//             await pool.query(
+//                 `UPDATE auth_methods SET metadata = $1::jsonb WHERE user_id = $2 AND type = 'password'`,
+//                 [JSON.stringify(newHashed), userId]
+//             );
+//             console.log('password changed');
+//             reply.send({ success: true });
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// server.get('/api/auth/sessions', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         try {
+//             const userId = request.jwtUser.userId;
+
+//             // Get all sessions from Redis for this user
+//             const sessions = [];
+//             const keys = await redis.keys(`session:*`);
+
+//             for (const key of keys) {
+//                 const storedUserId = await redis.get(key);
+//                 if (storedUserId === String(userId)) {
+//                     // Get token from key (remove 'session:' prefix)
+//                     const token = key.replace('session:', '');
+
+//                     try {
+//                         // Decode JWT to get device info
+//                         const decoded = await decodeToken(token);
+
+//                         // Add to sessions array if valid
+//                         sessions.push({
+//                             id: token,
+//                             device: decoded.device || 'Unknown Device',
+//                             browser: decoded.browser || 'Unknown Browser',
+//                             location: decoded.location || 'Unknown Location',
+//                             lastActive: decoded.iat ? new Date(decoded.iat * 1000).toISOString() : new Date().toISOString(),
+//                             current: request.headers.authorization?.includes(token) || false
+//                         });
+//                     } catch (err) {
+//                         // Skip invalid tokens
+//                         continue;
+//                     }
+//                 }
+//             }
+
+//             return { sessions };
+//         } catch (error) {
+//             reply.code(500).send({ error: 'Failed to fetch sessions' });
+//         }
+//     }
+// });
+
+// server.delete('/api/auth/sessions/:sessionId', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         try {
+//             const { sessionId } = request.params as { sessionId: string };
+//             const userId = request.jwtUser.userId;
+
+//             // Check if session belongs to user
+//             const storedUserId = await redis.get(`session:${sessionId}`);
+//             if (!storedUserId || storedUserId !== String(userId)) {
+//                 return reply.code(403).send({ error: 'Session not found or unauthorized' });
+//             }
+
+//             // Remove session from Redis
+//             await redis.del(`session:${sessionId}`);
+
+//             return { success: true };
+//         } catch (error) {
+//             reply.code(500).send({ error: 'Failed to revoke session' });
+//         }
+//     }
+// });
+
+// server.delete('/api/auth/sessions', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         try {
+//             const userId = request.jwtUser.userId;
+//             const currentToken = request.headers.authorization?.replace('Bearer ', '');
+
+//             // Get all sessions for user
+//             const keys = await redis.keys('session:*');
+
+//             for (const key of keys) {
+//                 const storedUserId = await redis.get(key);
+//                 const token = key.replace('session:', '');
+
+//                 // Skip current session and sessions not belonging to user
+//                 if (storedUserId === String(userId) && token !== currentToken) {
+//                     await redis.del(key);
+//                 }
+//             }
+
+//             return { success: true };
+//         } catch (error) {
+//             reply.code(500).send({ error: 'Failed to revoke sessions' });
+//         }
+//     }
+// });
+
+// server.post('/api/auth/sessions/revoke', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const userId = request.jwtUser.userId;
+//         // e.g. only Admin can revoke sessions
+//         if (!(await hasPermission(String(userId), 'sessions.revoke'))) {
+//             return reply.status(403).send({ error: 'Forbidden' });
+//         }
+
+//         const { tokenId } = request.body as { tokenId: string };
+
+//         try {
+//             await redis.del(`session:${tokenId}`);
+//             reply.send({ success: true });
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// server.post('/api/auth/2fa/setup', { onRequest: [server.authenticate] }, async (request, reply) => {
+//     try {
+//         const { userId, email } = request.jwtUser;
+//         const recovery_codes = Array.from({ length: 10 }, () => Math.floor(Math.random() * 1000000).toString().padStart(6, '0'));
+//         const secret = authenticator.generateSecret();
+//         const otpauth = authenticator.keyuri(email, process.env.APP_NAME, secret);
+//         console.log('Setting up 2FA for user:', userId, otpauth);
+//         const qrCodeDataURL = await QRCode.toDataURL(otpauth);
+
+//         // check if totp_secret already exists but two_factor_enabled is false in users table (possibly from a previous setup attempt), and delete it if it does
+//         const existingResult = await pool.query('SELECT * FROM user_2fa WHERE user_id = $1', [userId]);
+//         if (existingResult.rowCount > 0) {
+//             await pool.query('DELETE FROM user_2fa WHERE user_id = $1', [userId]);
+//         }
+
+//         // Insert the secret and recovery codes into the user_2fa table
+//         await pool.query(
+//             'INSERT INTO user_2fa (user_id, totp_secret, recovery_codes) VALUES ($1, $2, $3::jsonb)',
+//             [userId, secret, JSON.stringify(recovery_codes)]
+//         );
+
+//         reply.send({ qrCodeDataURL, otpauth, recovery_codes });
+//     } catch (error) {
+//         console.error('2FA setup error:', error);
+//         reply.code(500).send({ error: 'Failed to set up 2FA: ', details: error.message });
+//     }
+// });
+
+// server.post<{ Body: { code: string } }>('/api/auth/2fa/verify', { onRequest: [server.authenticate] }, async (request, reply) => {
+//     try {
+//         const { userId } = request.jwtUser;
+//         let { code } = request.body; // Only code is expected.
+//         // cast code to integer
+//         // code = parseInt(code, 10);
+//         // console.log('Verifying 2FA for user:', userId, code);
+//         const result = await pool.query('SELECT totp_secret FROM user_2fa WHERE user_id = $1', [userId]);
+
+//         if (result.rowCount === 0) {
+//             return reply.code(404).send({ error: 'User not found' });
+//         }
+//         const totpSecret = result.rows[0].totp_secret;
+//         console.log(totpSecret);
+//         if (!totpSecret) {
+//             return reply.code(400).send({ error: '2FA not set up for this user' });
+//         }
+//         const isValid = authenticator.check(code, totpSecret);
+//         console.log('2FA verification result:', { code, totpSecret, isValid });
+//         if (!isValid) {
+//             return reply.code(400).send({ error: 'Invalid TOTP code' });
+//         }
+//         await pool.query('UPDATE users SET two_factor_enabled = TRUE WHERE id = $1', [userId]);
+//         reply.send({ success: true });
+//     } catch (error) {
+//         console.log('2FA verification error:', error);
+//         reply.code(500).send({ error: 'Failed to verify 2FA', details: error.message });
+//     }
+// });
+
+
+// server.post('/api/auth/2fa/disable', { onRequest: [server.authenticate] }, async (request, reply) => {
+//     try {
+//         const { userId } = request.jwtUser!;
+//         const { code } = request.body as { code: string };
+//         console.log('Disabling 2FA for user:', userId, code);
+
+//         // Verify the TOTP code before disabling
+//         const result = await pool.query('SELECT totp_secret FROM user_2fa WHERE user_id = $1', [userId]);
+//         if (result.rowCount === 0) {
+//             return reply.code(404).send({ error: 'User secret not found' });
+//         }
+//         const { totp_secret } = result.rows[0];
+//         console.log('2FA secret:', totp_secret);
+
+//         const isValid = authenticator.check(code, totp_secret);
+//         if (!isValid) {
+//             //expected TOTP code
+//             console.log(`Expected TOTP code: ${authenticator.generate(totp_secret)}`);
+
+//             console.error('Invalid TOTP code:', { code }, 'for user:', userId);
+//             return reply.code(400).send({ error: 'Invalid TOTP code' });
+//         }
+
+//         // Disable 2FA and remove the secret
+//         await pool.query('UPDATE users SET two_factor_enabled = FALSE WHERE id = $1', [userId]);
+//         await pool.query('DELETE FROM user_2fa WHERE user_id = $1', [userId]);
+//         console.log('2FA disabled for user:', userId);
+//         reply.send({ success: true });
+//     } catch (error) {
+//         console.error('2FA disable error:', error);
+//         reply.code(500).send({ error: 'Failed to disable 2FA', details: error.message });
+//     }
+// });
+
+// server.post('/api/auth/2fa/login/verify', async (request, reply) => {
+//     try {
+//         // Expect a temporary token with pending2FA flag and a TOTP code.
+//         const { tempToken, code } = request.body as { tempToken: string; code: string };
+
+//         if (typeof tempToken !== 'string' || !tempToken) {
+//             console.log('Invalid temporary token:', {tempToken});
+//             return reply.code(400).send({ error: 'Invalid temporary token' });
+//         }
+
+//         // Verify the temporary token.
+//         const payload = await verifyToken(tempToken);
+//         if (!payload.pending2FA) {
+//             console.log('Invalid temporary token:', {tempToken});
+//             return reply.code(400).send({ error: 'Invalid token for 2FA verification' });
+//         }
+//         const userId = payload.userId;
+
+//         // Fetch the user's TOTP secret.
+//         const result = await pool.query('SELECT totp_secret, recovery_codes FROM user_2fa WHERE user_id = $1', [userId]);
+//         if (result.rowCount === 0) {
+//             return reply.code(404).send({ error: 'User not found' });
+//         }
+//         const totpSecret = result.rows[0].totp_secret;
+//         let recovery_codes = result.rows[0].recovery_codes as string[];
+//         console.log(result.rows[0].recovery_codes);
+//         if (!totpSecret) {
+//             console.log('2FA not set up for this user:', {userId});
+//             return reply.code(400).send({ error: '2FA not set up for this user' });
+//         }
+
+//         // Verify the provided TOTP code.
+//         console.log(recovery_codes);
+//         const isValid = authenticator.check(code, totpSecret) || recovery_codes.includes(code);
+//         if (!isValid) {
+//             console.log('Invalid TOTP code:', {code});
+//             return reply.code(400).send({ error: 'Invalid TOTP code' });
+//         }
+
+//         // If the code is valid, issue the final token.
+//         const isAdmin = await hasRole(userId, 'admin');
+//         const finalToken = await signToken(
+//             {
+//                 userId: userId,
+//                 isAdmin,
+//             }
+//         );
+//         await redis.set(`session:${finalToken}`, String(userId), { EX: 60 * 60 * 24 * 60 }); // 60 days
+
+//         // if a recovery code was used, remove it from the list
+//         if (recovery_codes.includes(code)) {
+//             await pool.query(
+//             'UPDATE user_2fa SET recovery_codes = $1 WHERE user_id = $2',
+//             [JSON.stringify(recovery_codes.filter((rc: string) => rc !== code)), userId]
+//             );
+//         }
+
+//         // Remove the temporary challenge (if any) from Redis.
+//         reply
+//             .setCookie('checkpoint_jwt', finalToken, {
+//                 httpOnly: true,
+//                 secure: process.env.NODE_ENV === 'production',
+//             })
+//             .send({ success: true, finalToken });
+//     } catch (error: any) {
+//         console.error('2FA login verification error:', error);
+//         reply.code(500).send({ error: error.message || 'Failed to verify 2FA' });
+//     }
+// });
+
+// /*
+
+// SSO ROUTES
+
+// */
+
+// server.get('/api/sso', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         try {
+//             const result = await pool.query(
+//                 'SELECT id, name, client_id, config, created_at FROM sso_providers'
+//             );
+//             reply.send(result.rows);
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// server.post('/api/sso', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { name, client_id, client_secret, config } = request.body as {
+//             name: string;
+//             client_id: string;
+//             client_secret: string;
+//             config?: any;
+//         };
+
+//         try {
+//             const result = await pool.query(
+//                 `
+//             INSERT INTO sso_providers (name, client_id, client_secret, config)
+//                  VALUES ($1, $2, $3, COALESCE($4, '{}'))
+//               RETURNING id, name, client_id, config, created_at
+//           `,
+//                 [name, client_id, client_secret, config]
+//             );
+//             reply.send(result.rows[0]);
+//         } catch (err: any) {
+//             if (err.code === '23505') {
+//                 return reply.status(400).send({ error: 'SSO provider already exists' });
+//             }
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+// server.patch('/api/sso/:id', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { id } = request.params as ProviderIdParam;
+//         const { name, client_id, client_secret, config } = request.body as {
+//             name?: string;
+//             client_id?: string;
+//             client_secret?: string;
+//             config?: any;
+//         };
+
+//         try {
+//             const result = await pool.query(
+//                 `
+//             UPDATE sso_providers
+//                SET name          = COALESCE($1, name),
+//                    client_id     = COALESCE($2, client_id),
+//                    client_secret = COALESCE($3, client_secret),
+//                    config        = COALESCE($4, config)
+//              WHERE id = $5
+//              RETURNING id, name, client_id, config, created_at
+//           `,
+//                 [name, client_id, client_secret, config, id]
+//             );
+//             if (result.rowCount === 0) {
+//                 return reply.status(404).send({ error: 'SSO provider not found' });
+//             }
+//             reply.send(result.rows[0]);
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+// server.delete('/api/sso/:id', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { id } = request.params as ProviderIdParam;
+//         try {
+//             const result = await pool.query(
+//                 'DELETE FROM sso_providers WHERE id = $1 RETURNING id',
+//                 [id]
+//             );
+//             if (result.rowCount === 0) {
+//                 return reply.status(404).send({ error: 'SSO provider not found' });
+//             }
+//             reply.send({ success: true, providerId: id });
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// server.get('/api/auth/sso/google', passport.authenticate('google', {
+//     scope: ['profile', 'email']
+// }));
+
+// server.get('/api/auth/sso/google/callback', {
+//     preHandler: passport.authenticate('google', { session: false }),
+//     handler: async (request, reply) => {
+//         const user = request.user as { id: string; email?: string };
+
+//         // Create your own JWT
+//         const isAdmin = await hasRole(user.id, 'admin');
+
+//         // Sign and return a JWT token
+//         const token = await signToken(
+//             {
+//                 userId: user.id,
+//                 isAdmin,
+//             },
+//         );
+//         await redis.set(`session:${token}`, String(user.id), {
+//             EX: 60 * 60 * 24 * 60 // 60 days;
+//         });
+
+//         // Set it as an HTTP-only cookie
+//         reply.setCookie('checkpoint_jwt', token, {
+//             httpOnly: true,
+//             secure: process.env.NODE_ENV === 'production',
+//             sameSite: 'none', // if the frontend is a different domain
+//             path: '/',
+//             // maxAge: 3600, // optional: 1 hour
+//         });
+
+//         // Redirect the user to frontend, WITHOUT the token
+//         reply.redirect(`${process.env.FRONTEND_URL}/dashboard`);
+//     }
+// });
+
+// server.get('/api/auth/sso/line',
+//     passport.authenticate('line', {
+//         scope: ['profile', 'openid', 'email']
+//     })
+// );
+
+// server.get('/api/auth/sso/line/callback', {
+//     preHandler: passport.authenticate('line', { session: false }),
+//     handler: async (request, reply) => {
+//         const user = request.user as PassportUser;
+
+//         const rolesRes = await pool.query(
+//             `SELECT r.name 
+//         FROM user_roles ur
+//         JOIN roles r ON ur.role_id = r.id
+//         WHERE ur.user_id = $1`,
+//             [user.id]
+//         );
+//         const roles = rolesRes.rows.map(row => row.name);
+//         const isAdmin = roles.includes('admin');
+
+//         // Sign and return a JWT token
+//         const token = await signToken(
+//             { userId: user.id, isAdmin },
+//         );
+//         await redis.set(`session:${token}`, String(user.id), {
+//             EX: 60 * 60 * 24 * 60 // 60 days;
+//         });
+
+//         reply.setCookie('checkpoint_jwt', token, {
+//             httpOnly: true,
+//             secure: process.env.NODE_ENV === 'production',
+//             sameSite: 'none',
+//         });
+
+//         // Redirect to frontend with token
+//         reply.redirect(`${process.env.FRONTEND_URL}/auth/callback?token=${token}`);
+//     }
+// });
+
+// /*
+// /auth/users
+
+// Handles all user-related routes
+// */
+
+// server.get('/api/users/exists', {
+//     handler: async (request, reply) => {
+//         const { email } = request.query as { email: string };
+//         const result = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+//         return { exists: result.rowCount > 0 };
+//     },
+// });
+
+// // get all users
+// server.get('/api/users', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         try {
+//             // If you want to restrict this to admins, do an additional check here:
+//             console.log(`Received request from user ${request.jwtUser.userId} on route GET /api/users`);
+//             const canSearch = await hasPermission(String(request.jwtUser.userId), 'users.search');
+//             if (canSearch) {
+//                 console.log('User has permission to search users');
+//             } else {
+//                 console.log('User does not have permission to search users');
+//                 return reply.status(403).send({ error: 'Forbidden' });
+//             }
+
+//             const { search, page = 1, pageSize = 10 } = request.query as {
+//                 search?: string;
+//                 page?: number;
+//                 pageSize?: number;
+//             };
+//             const offset = (page - 1) * pageSize;
+//             const likeQuery = `%${search || ''}%`;
+
+//             try {
+//                 const result = await pool.query(
+//                     `
+//                     SELECT *
+//                         FROM users
+//                     WHERE email ILIKE $1
+//                         OR first_name ILIKE $1
+//                         OR last_name ILIKE $1
+//                     ORDER BY created_at DESC
+//                     LIMIT $2 OFFSET $3
+//                     `,
+//                     [likeQuery, pageSize, offset]
+//                 );
+//                 // for each result, parse each row as UserSchema then add to outgoing array
+//                 console.log(result.rows);
+//                 const _outgoing = result.rows.map((row) => {
+//                     let json_encoded_address = JSON.parse(row.address);
+//                     let parsedResult = {
+//                         id: row.id,
+//                         email: row.email,
+//                         public_key: row.public_key,
+//                         created_at: row.created_at,
+//                         two_factor_enabled: row.two_factor_enabled,
+//                         profile: {
+//                             first_name: row.first_name,
+//                             last_name: row.last_name,
+//                             profile_picture: row.profile_picture || '',
+//                             dateOfBirth: row.dateofbirth,
+//                             phone: row.phone_number,
+//                             address: json_encoded_address,
+//                         },
+//                     };
+//                     return UserSchema.parse(parsedResult);
+//                 });
+//                 // console.log(_outgoing);
+//                 reply.send(_outgoing);
+//             } catch (err) {
+//                 reply.status(500).send({ error: 'Database error' });
+//             }
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// // get user's profile
+// server.get('/api/users/:id', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { id } = request.params as { id: string };
+//         try {
+//             // only allow users to view their own profile, or admins to view any profile
+//             if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+//                 return reply.status(403).send({ error: 'Forbidden' });
+//             }
+
+//             const result = await pool.query(
+//                 'SELECT * FROM users WHERE id = $1',
+//                 [id]
+//             );
+//             console.log(result.rows[0]);
+//             // console.log(result.rows[0]);
+//             let json_encoded_address = JSON.parse(result.rows[0].address);
+//             let parsedResult = {
+//                 id: result.rows[0].id,
+//                 email: result.rows[0].email,
+//                 public_key: result.rows[0].public_key,
+//                 created_at: result.rows[0].created_at,
+//                 two_factor_enabled: result.rows[0].two_factor_enabled,
+//                 profile: {
+//                     first_name: result.rows[0].first_name,
+//                     last_name: result.rows[0].last_name,
+//                     profile_picture: result.rows[0].profile_picture || '',
+//                     dateOfBirth: result.rows[0].dateofbirth,
+//                     phone: result.rows[0].phone_number,
+//                     address: json_encoded_address,
+//                 },
+//             };
+//             let outgoing_ = UserSchema.parse(parsedResult);
+//             console.log(outgoing_);
+
+//             // get date time last changed password
+//             const password_changed_at = await pool.query(
+//                 'SELECT created_at FROM auth_methods WHERE user_id = $1 AND type = $2',
+//                 [id, 'password']
+//             );
+
+//             // store last password change date in the first row
+//             outgoing_.password_changed_at = password_changed_at.rows[0]?.created_at;
+
+//             if (!outgoing_) {
+//                 return reply.status(404).send({ error: 'User not found' });
+//             }
+//             reply.send(outgoing_);
+//         } catch (err) {
+//             reply.status(500).send({ message: 'An error occurred: ' + err });
+//         }
+//     },
+// });
+
+// // update user's profile
+// server.put('/api/users/:id', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { id } = request.params as { id: string };
+//         const toUpdate = UserSchema.parse(request.body);
+
+//         try {
+//             if (request.jwtUser.userId !== id || !request.jwtUser.isAdmin) {
+//                 return reply.status(403).send({ error: 'Forbidden' });
+//             }
+
+//             const result = await pool.query(
+//                 `UPDATE users 
+//                  SET email = $1, 
+//                      first_name = $2, 
+//                      last_name = $3, 
+//                      dateOfBirth = $4, 
+//                      phone_number = $5, 
+//                      address = $6, 
+//                      profile_picture = $7 
+//                  WHERE id = $8 RETURNING *`,
+//                 [
+//                     toUpdate.email,
+//                     toUpdate.profile.first_name,
+//                     toUpdate.profile.last_name,
+//                     toUpdate.profile.dateOfBirth,
+//                     toUpdate.profile.phone,
+//                     toUpdate.profile.address,
+//                     toUpdate.profile.profile_picture,
+//                     id
+//                 ]
+//             );
+//             if (result.rowCount === 0) {
+//                 return reply.status(404).send({ error: 'User not found' });
+//             }
+//             reply.send(result.rows[0]);
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         };
+//     }
+// });
+
+// // delete user
+
+// server.delete('/api/users/:id', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { id } = request.params as { id: string };
+//         // const requester_permissions = getUserPermissions(String(request.jwtUser.userId));
+//         try {
+//             // allow user to delete their own account, or an admin to delete any account
+//             if (request.jwtUser.userId !== id && !hasPermission(String(request.jwtUser.userId), 'users.delete')) {
+//                 return reply.status(403).send({ error: 'Forbidden' });
+//             }
+
+//             const result = await pool.query(
+//                 'DELETE FROM users WHERE id = $1 RETURNING id',
+//                 [id]
+//             );
+//             if (result.rowCount === 0) {
+//                 return reply.status(404).send({ error: 'User not found' });
+//             }
+//             reply.send({ success: true, userId: id });
+//         } catch (err) {
+//             console.log(err);
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// // get user's auth methods
+// server.get('/api/users/:id/auth-methods', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { id } = request.params as { id: string };
+//         try {
+//             if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+//                 return reply.status(403).send({ error: 'Forbidden' });
+//             }
+
+//             const result = await pool.query(
+//                 `
+//             SELECT id, type, is_preferred, metadata, created_at, last_used_at
+//               FROM auth_methods
+//              WHERE user_id = $1
+//           `,
+//                 [id]
+//             );
+//             reply.send(result.rows);
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// // add auth method to user
+// server.post('/api/users/:id/auth-methods', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { id } = request.params as { id: string };
+//         const { type, is_preferred, metadata } = request.body as {
+//             type: 'password' | 'passkey' | 'biometric' | 'sso';
+//             is_preferred?: boolean;
+//             metadata?: any;
+//         };
+
+//         try {
+//             if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+//                 return reply.status(403).send({ error: 'Forbidden' });
+//             }
+
+//             const result = await pool.query(
+//                 `
+//             INSERT INTO auth_methods (user_id, type, is_preferred, metadata)
+//                  VALUES ($1, $2, COALESCE($3, false), COALESCE($4, '{}'))
+//               RETURNING id, type, is_preferred, metadata, created_at, last_used_at
+//           `,
+//                 [id, type, is_preferred, metadata]
+//             );
+//             reply.send(result.rows[0]);
+//         } catch (err: any) {
+//             if (err.code === '23503') {
+//                 return reply.status(404).send({ error: 'User not found' });
+//             }
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// // update auth method
+// server.get('/api/users/:id/sso', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { id } = request.params as { id: string };
+//         try {
+//             // if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+//             //   return reply.status(403).send({ error: 'Forbidden' });
+//             // }
+
+//             const result = await pool.query(
+//                 `
+//             SELECT usc.id,
+//                    usc.provider_id,
+//                    sp.name as provider_name,
+//                    usc.external_user_id,
+//                    usc.created_at
+//               FROM user_sso_connections usc
+//               JOIN sso_providers sp ON usc.provider_id = sp.id
+//              WHERE usc.user_id = $1
+//           `,
+//                 [id]
+//             );
+//             reply.send(result.rows);
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// // add sso connection to user
+// server.post('/api/users/:id/sso', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { id } = request.params as UserIdParam;
+//         const { provider_id, external_user_id } = request.body as SsoConnectionBody;
+
+//         try {
+//             // if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+//             //   return reply.status(403).send({ error: 'Forbidden' });
+//             // }
+
+//             const result = await pool.query(
+//                 `
+//             INSERT INTO user_sso_connections (user_id, provider_id, external_user_id)
+//                  VALUES ($1, $2, $3)
+//               RETURNING id, user_id, provider_id, external_user_id, created_at
+//           `,
+//                 [id, provider_id, external_user_id]
+//             );
+//             reply.send(result.rows[0]);
+//         } catch (err: any) {
+//             if (err.code === '23503') {
+//                 // foreign key violation for user or provider
+//                 return reply.status(404).send({ error: 'User or provider not found' });
+//             }
+//             if (err.code === '23505') {
+//                 // unique (provider_id, external_user_id)
+//                 return reply.status(400).send({ error: 'This SSO connection already exists' });
+//             }
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// // add role to user
+// server.post('/api/users/:id/role', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { id } = request.params as UserIdParam;
+//         const { roleId } = request.body as RoleIdBody;
+
+//         try {
+//             if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+//                 return reply.status(403).send({ error: 'Forbidden' });
+//             }
+
+//             await pool.query(
+//                 `
+//             INSERT INTO user_roles (user_id, role_id)
+//                  VALUES ($1, $2)
+//             ON CONFLICT (user_id, role_id) DO NOTHING
+//           `,
+//                 [id, roleId]
+//             );
+//             reply.send({ success: true });
+//         } catch (err: any) {
+//             if (err.code === '23503') {
+//                 // foreign key violation for user or role
+//                 return reply.status(404).send({ error: 'User or role not found' });
+//             }
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// // remove role from user
+// server.delete('/api/users/:id/role', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { id } = request.params as UserIdParam;
+//         const { roleId } = request.body as RoleIdBody;
+
+//         try {
+//             if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+//                 return reply.status(403).send({ error: 'Forbidden' });
+//             }
+
+//             const result = await pool.query(
+//                 'DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2 RETURNING user_id, role_id',
+//                 [id, roleId]
+//             );
+//             if (result.rowCount === 0) {
+//                 return reply.status(404).send({ error: 'User or role not found' });
+//             }
+//             reply.send({ success: true });
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// // get user's roles
+// server.get('/api/users/:id/roles', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { id } = request.params as UserIdParam;
+//         try {
+//             if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+//                 return reply.status(403).send({ error: 'Forbidden' });
+//             }
+
+//             const result = await pool.query(
+//                 `
+//             SELECT r.id, r.name, r.description
+//               FROM user_roles ur
+//               JOIN roles r ON ur.role_id = r.id
+//              WHERE ur.user_id = $1
+//           `,
+//                 [id]
+//             );
+//             reply.send(result.rows);
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// // user profile picture
+
+// server.post('/api/users/:id/profile-pic', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { id } = request.params as UserIdParam;
+//         const files = await request.files();
+//         const file = files[0];  // Get first uploaded file
+//         if (!file) {
+//             console.error(`No file uploaded for ${id}`);
+//             return reply.status(400).send({ error: 'No file uploaded' });
+//         }
+
+//         // Read file buffer
+//         const buffer = await file.toBuffer();
+
+//         // Convert to base64 string for storage
+//         const profile_picture = buffer.toString('base64');
+
+//         try {
+//             if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+//                 return reply.status(403).send({ error: 'Forbidden' });
+//             }
+
+//             const result = await pool.query(
+//                 'UPDATE users SET profile_picture = $1 WHERE id = $2 RETURNING id, profile_picture',
+//                 [profile_picture, id]
+//             );
+//             if (result.rowCount === 0) {
+//                 return reply.status(404).send({ error: 'User not found' });
+//             } else {
+//                 // save the image to the file system
+//                 try {
+//                     fs.writeFileSync(`../public/profile_images/${id}.png`, buffer);
+//                 } catch (err) {
+//                     console.error(err);
+//                     return reply.status(500).send({ error: 'Failed to save image' });
+//                 }
+//             }
+//             reply.send(result.rows[0]);
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// // get user's profile picture
+// server.get('/api/users/:id/profile-picture', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { id } = request.params as UserIdParam;
+//         try {
+//             const result = await pool.query(
+//                 'SELECT profile_picture FROM users WHERE id = $1',
+//                 [id]
+//             );
+//             if (result.rowCount === 0) {
+//                 return reply.status(404).send({ error: 'User not found' });
+//             }
+//             const profile_picture = result.rows[0].profile_picture;
+//             if (!profile_picture) {
+//                 return reply.status(404).send({ error: 'Profile picture not found' });
+//             }
+//             reply.send({ profile_picture });
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// // update user's profile picture
+// server.put('/api/users/:id/profile-picture', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { id } = request.params as UserIdParam;
+//         const files = await request.files();
+//         const file = files[0];  // Get first uploaded file
+//         if (!file) {
+//             return reply.status(400).send({ error: 'No file uploaded' });
+//         }
+
+//         // Read file buffer
+//         const buffer = await file.toBuffer();
+
+//         // Convert to base64 string for storage
+//         const profile_picture = buffer.toString('base64');
+
+//         try {
+//             if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+//                 return reply.status(403).send({ error: 'Forbidden' });
+//             }
+
+//             const result = await pool.query(
+//                 'UPDATE users SET profile_picture = $1 WHERE id = $2 RETURNING id, profile_picture',
+//                 [profile_picture, id]
+//             );
+//             if (result.rowCount === 0) {
+//                 return reply.status(404).send({ error: 'User not found' });
+//             } else {
+//                 // save the image to the file system
+//                 try {
+//                     fs.writeFileSync(`../public/profile_images/${id}.png`, buffer);
+//                 } catch (err) {
+//                     console.error(err);
+//                     return reply.status(500).send({ error: 'Failed to save image' });
+//                 }
+//             }
+//             reply.send(result.rows[0]);
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// // delete user's profile picture
+// server.delete('/api/users/:id/profile-picture', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { id } = request.params as UserIdParam;
+//         try {
+//             if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
+//                 return reply.status(403).send({ error: 'Forbidden' });
+//             }
+
+//             const result = await pool.query(
+//                 'UPDATE users SET profile_picture = NULL WHERE id = $1 RETURNING id',
+//                 [id]
+//             );
+//             if (result.rowCount === 0) {
+//                 return reply.status(404).send({ error: 'User not found' });
+//             } else {
+//                 // delete the image from the file system
+//                 try {
+//                     fs.unlinkSync(`../public/profile_images/${id}.png`);
+//                 } catch (err) {
+//                     console.error(err);
+//                     return reply.status(500).send({ error: 'Failed to delete image' });
+//                 }
+//             }
+//             reply.send({ success: true });
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// /*
+
+// ROLES ROUTES
+
+// */
+
+// server.get('/api/roles', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         try {
+//             const result = await pool.query('SELECT id, name, permissions, icon, description FROM roles');
+//             reply.send(result.rows);
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// server.post('/api/roles', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { name, description, permissions, icon } = request.body as {
+//             name: string;
+//             description?: string;
+//             permissions?: string[];
+//             icon?: string;
+//         };
+//         try {
+//             const result = await pool.query(
+//                 `
+//             INSERT INTO roles (name, description, permissions, icon)
+//              VALUES ($1, $2, $3, $4)
+//               RETURNING id, name, permissions, icon, description
+//           `,
+//                 [name, description ?? null, permissions ?? [], icon ?? null]
+//             );
+//             reply.send(result.rows[0]);
+//         } catch (err: any) {
+//             if (err.code === '23505') {
+//                 return reply.status(400).send({ error: 'Role name already exists' });
+//             }
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// server.post('/api/roles/:roleId/permissions', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const userId = request.jwtUser.userId;
+//         // Only an admin can do this
+//         if (!(await hasPermission(String(userId), 'roles.update'))) {
+//             return reply.status(403).send({ error: 'Forbidden' });
+//         }
+
+//         const { roleId } = request.params as { roleId: string };
+//         const { permissionsToAdd } = request.body as { permissionsToAdd: string[] };
+
+//         try {
+//             // 1) Get current permissions from DB
+//             const rRes = await pool.query(`SELECT permissions FROM roles WHERE id = $1`, [roleId]);
+//             if (rRes.rowCount === 0) {
+//                 return reply.status(404).send({ error: 'Role not found' });
+//             }
+//             let perms = rRes.rows[0].permissions || [];
+//             // 2) Merge in the new perms
+//             perms = Array.from(new Set([...perms, ...permissionsToAdd])); // deduplicate
+//             // 3) Update
+//             await pool.query(`UPDATE roles SET permissions = $1 WHERE id = $2`, [JSON.stringify(perms), roleId]);
+//             reply.send({ success: true, updatedPermissions: perms });
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// /*
+
+// AUTH METHODS ROUTES
+
+// */
+
+// server.patch('/api/auth-methods/:authMethodId', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { authMethodId } = request.params as AuthMethodIdParam;
+//         const { is_preferred, metadata } = request.body as {
+//             is_preferred?: boolean;
+//             metadata?: any;
+//         };
+
+//         try {
+//             const result = await pool.query(
+//                 `
+//             UPDATE auth_methods
+//                SET is_preferred = COALESCE($1, is_preferred),
+//                    metadata = COALESCE($2, metadata)
+//              WHERE id = $3
+//              RETURNING id, user_id, type, is_preferred, metadata, created_at, last_used_at
+//           `,
+//                 [is_preferred, metadata, authMethodId]
+//             );
+//             if (result.rowCount === 0) {
+//                 return reply.status(404).send({ error: 'Auth method not found' });
+//             }
+//             reply.send(result.rows[0]);
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// // DELETE AN AUTH METHOD
+// server.delete('/api/auth-methods/:authMethodId', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         const { authMethodId } = request.params as AuthMethodIdParam;
+//         try {
+//             const result = await pool.query(
+//                 'DELETE FROM auth_methods WHERE id = $1 RETURNING id',
+//                 [authMethodId]
+//             );
+//             if (result.rowCount === 0) {
+//                 return reply.status(404).send({ error: 'Auth method not found' });
+//             }
+//             reply.send({ success: true, authMethodId });
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
+
+// /*
+
+// AUDIT LOGS ROUTES
+
+// */
+
+// server.get('/api/audit-logs', {
+//     onRequest: [server.authenticate],
+//     handler: async (request, reply) => {
+//         try {
+//             // Possibly check if request.jwtUser.isAdmin
+
+//             const result = await pool.query(
+//                 `
+//             SELECT al.id,
+//                    al.user_id,
+//                    al.action,
+//                    al.details,
+//                    al.created_at,
+//                    u.email as user_email
+//               FROM audit_logs al
+//          LEFT JOIN users u ON al.user_id = u.id
+//           ORDER BY al.created_at DESC
+//           `
+//             );
+//             reply.send(result.rows);
+//         } catch (err) {
+//             reply.status(500).send({ error: 'Database error' });
+//         }
+//     },
+// });
 
 // Start server
 async function start() {

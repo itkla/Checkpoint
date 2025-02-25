@@ -55,7 +55,7 @@ export default function DashboardPage() {
     return (
         <div>
             <div className="mb-8">
-                <h1 className="text-3xl font-bold text-gray-700 mb-2">ダッシュボード</h1>
+                <h1 className="text-3xl font-bold text-gray-700 mb-2">ホーム</h1>
                 <p className="text-gray-500">システムの概要と主要な指標を確認できます。</p>
             </div>
 
@@ -68,11 +68,9 @@ export default function DashboardPage() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="bg-white rounded-lg shadow p-6">
                     <h2 className="text-lg font-semibold mb-4">最近のアクティビティ</h2>
-                    {/* Activity list component would go here */}
                 </div>
                 <div className="bg-white rounded-lg shadow p-6">
                     <h2 className="text-lg font-semibold mb-4">重要な通知</h2>
-                    {/* Notifications component would go here */}
                 </div>
             </div>
         </div>

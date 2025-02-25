@@ -31,6 +31,9 @@ export function TwoFactorSetup({ isOpen, onClose, onComplete, is2FAEnabled }: Tw
     const [isVerifying, setIsVerifying] = useState(false);
     const [isLoadingSetup, setIsLoadingSetup] = useState(false);
     const [showMFADialog, setShowMFADialog] = useState(false);
+    const [ recoveryCodes, setRecoveryCodes ] = useState<string[]>([]);
+    const [ hasShownRecoveryDialog, setHasShownRecoveryDialog ] = useState(false);
+    const [ showRecoveryDialog, setShowRecoveryDialog ] = useState(false);
     const { toast } = useToast();
 
     // get current user
@@ -42,7 +45,9 @@ export function TwoFactorSetup({ isOpen, onClose, onComplete, is2FAEnabled }: Tw
             const response = await api.auth.initiate2FA();
             // setSecret(response.secret);
             setOtpauth(response.otpauth);
+            console.log(`otpauth: ${response.otpauth}`);
             setQrCode(response.qrCodeDataURL);
+            setRecoveryCodes(response.recoveryCodes);
         } catch (error: any) {
             toast({
                 title: "エラー",
@@ -62,8 +67,11 @@ export function TwoFactorSetup({ isOpen, onClose, onComplete, is2FAEnabled }: Tw
                 title: "成功",
                 description: "2要素認証が正常に設定されました",
             });
-            onComplete();
-            onClose();
+            // Show recovery codes dialog only once
+            if (!hasShownRecoveryDialog) {
+                setHasShownRecoveryDialog(true);
+                setShowRecoveryDialog(true);
+            }
         } catch (error: any) {
             if (error.statusCode === 400) {
                 toast({
@@ -78,8 +86,9 @@ export function TwoFactorSetup({ isOpen, onClose, onComplete, is2FAEnabled }: Tw
                     variant: "destructive",
                 });
             }
-            
         } finally {
+            onComplete();
+            onClose();
             setIsVerifying(false);
         }
     };
@@ -160,7 +169,8 @@ export function TwoFactorSetup({ isOpen, onClose, onComplete, is2FAEnabled }: Tw
                             )
                         )}
                 </div>
-
+                <Dialog open={showRecoveryDialog} onOpenChange={() => setShowRecoveryDialog(false)}>
+                </Dialog>
                 <DialogFooter>
                     <Button variant="outline" onClick={onClose} disabled={isLoadingSetup || isVerifying}>
                         キャンセル

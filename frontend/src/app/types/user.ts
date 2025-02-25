@@ -26,6 +26,7 @@ export interface User {
     permissions?: string[];
     password_changed_at?: string;
     two_factor_enabled?: boolean;
+    password?: string;
 }
 
 export interface AuthResponse {

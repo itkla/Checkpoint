@@ -23,8 +23,8 @@ CREATE TABLE users (
     private_key TEXT NOT NULL,
     public_key TEXT NOT NULL,
     profile_picture VARCHAR(255),
-    dateOfBirth DATE,
-    phone_number VARCHAR(20),
+    dateOfBirth TEXT,
+    phone_number VARCHAR(9999),
     address VARCHAR(9999),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
@@ -56,9 +56,10 @@ CREATE TABLE user_2fa (
 CREATE TABLE user_logs (
     id SERIAL PRIMARY KEY,
     user_id VARCHAR(20) REFERENCES users(id) ON DELETE CASCADE,
-    action VARCHAR(255) NOT NULL,
+    -- action VARCHAR(255) NOT NULL,
     details JSONB,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    last_updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Create sso_providers table

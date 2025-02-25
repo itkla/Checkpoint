@@ -1,29 +1,30 @@
 import {User} from '@/app/types/user';
+import { headers } from 'next/headers';
+import { LoginCredentials } from '@/app/types/user';
+import { AuthResponse } from '@/app/types/auth';
+import axios from 'axios';
 
-const API_BASE = '/api';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://localhost:3001';
 
-export async function fetchUsers(page: number, limit: number) {
-    const response = await fetch(
-        `${API_BASE}/users?page=${page}&limit=${limit}`
-    );
-    if (!response.ok) throw new Error('Failed to fetch users');
-    return response.json();
+const apiClient = axios.create({
+    baseURL: API_URL,
+    withCredentials: true,
+});
+
+apiClient.interceptors.request.use(async (config) => {
+    const requestHeaders = await headers();
+    const token = requestHeaders.get('x-checkpoint-token');
+    if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+});
+
+// authentication API
+
+export async function login(credentials: LoginCredentials): Promise<AuthResponse> {
+    // console.log('Sending credentials:', credentials); // Debug log
+    const response = await apiClient.post<AuthResponse>('/api/auth/login', credentials);
+    return response.data;
 }
 
-export async function updateUser(user: User) {
-    const response = await fetch(`${API_BASE}/users/${user.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(user),
-    });
-    if (!response.ok) throw new Error('Failed to update user');
-    return response.json();
-}
-
-export async function deleteUser(userId: string) {
-    const response = await fetch(`${API_BASE}/users/${userId}`, {
-        method: 'DELETE',
-    });
-    if (!response.ok) throw new Error('Failed to delete user');
-    return response.json();
-}

@@ -41,6 +41,7 @@ export function EmailStep({ initialEmail, onNext }: EmailStepProps) {
             }
             onNext(data.email);
         } catch (error) {
+            console.log(error);
             toast({
                 title: "エラー",
                 description: "メールアドレスの確認に失敗しました",

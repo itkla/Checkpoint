@@ -1,5 +1,6 @@
 // lib/api-client.ts
 import axios from 'axios';
+// import { cookies } from 'next/headers';
 import type {
     User,
     AuthResponse,
@@ -9,6 +10,7 @@ import type {
     UserSession,
 } from '@/app/types/user';
 import { register } from 'module';
+// import { headers } from 'next/headers';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://localhost:3001';
 
@@ -17,7 +19,8 @@ const apiClient = axios.create({
     withCredentials: true,
 });
 
-apiClient.interceptors.request.use((config) => {
+apiClient.interceptors.request.use(async (config) => {
+    // const token = headers.('x-checkpoint-token');
     const token = localStorage.getItem('token');
     if (token) {
         config.headers.Authorization = `Bearer ${token}`;
@@ -187,12 +190,18 @@ export const userApi = {
         return response.data;
     },
 
+    me: async () => {
+        const response = await apiClient.get('/api/users/me');
+        return response.data;
+    },
+
     getUser: async (id: string) => {
         const response = await apiClient.get<User>(`/api/users/${id}`);
         return response.data;
     },
 
     updateUser: async (id: string, data: Partial<User>) => {
+        console.log('Updating user:', data); // Debug log
         const response = await apiClient.put<User>(`/api/users/${id}`, data);
         return response.data;
     },
@@ -207,6 +216,13 @@ export const userApi = {
     getUserAuthMethods: async (id: string) => {
         const response = await apiClient.get<UserAuthMethod[]>(
             `/api/users/${id}/auth-methods`
+        );
+        return response.data;
+    },
+
+    getUserLoginMethods: async (email: string) => {
+        const response = await apiClient.get<UserAuthMethod[]>(
+            `/api/users/${email}/login-auth-methods`
         );
         return response.data;
     },

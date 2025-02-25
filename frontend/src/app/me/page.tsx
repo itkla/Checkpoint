@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { api } from '@/lib/api-client';
+import { useUser } from '@/hooks/useUser';
+// import { api } from '@/lib/api-client';
 import { User } from '@/app/types/user';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -33,10 +34,12 @@ import {
 } from '@heroicons/react/24/outline';
 import { RoleBadge } from '@/app/components/RoleBadge';
 import { TwoFactorSetup } from '@/app/components/auth/TwoFactorSetup';
+import { Router } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 
 export default function AccountPage() {
-    const [user, setUser] = useState<User | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
+    const { user, isLoading, error, userAuth } = useUser();
+    // const [isLoading, setIsLoading] = useState(true);
     const [showEditDialog, setShowEditDialog] = useState(false);
     const [showPasswordDialog, setShowPasswordDialog] = useState(false);
     const [showSessions, setShowSessions] = useState(false);
@@ -45,34 +48,9 @@ export default function AccountPage() {
     const [showPasskeyManager, setShowPasskeyManager] = useState(false);
     const [show2FASetup, setShow2FASetup] = useState(false);
     const { toast } = useToast();
+    const router = useRouter();
 
-    useEffect(() => {
-        const fetchUserData = async () => {
-            try {
-                const token = localStorage.getItem('token');
-                if (!token) {
-                    throw new Error('No token found');
-                }
-
-                const decoded = jwtDecode<{ userId: string }>(token);
-                const userData = await api.users.getUser(decoded.userId);
-                console.log('User data:', userData);
-                setUser(userData);
-                console.log('User:', user);
-            } catch (error) {
-                toast({
-                    title: "エラー",
-                    description: "ユーザー情報の取得に失敗しました",
-                    variant: "destructive",
-                });
-            } finally {
-                setIsLoading(false);
-            }
-        };
-
-        fetchUserData();
-    }, [toast]);
-
+    console.log('[me/page.tsx] userAuth:', userAuth);
     if (isLoading) {
         return (
             <div className="flex justify-center items-center min-h-screen">
@@ -98,7 +76,7 @@ export default function AccountPage() {
                             <TabsList>
                                 <TabsTrigger value="profile">プロフィール</TabsTrigger>
                                 <TabsTrigger value="security">セキュリティ</TabsTrigger>
-                                <TabsTrigger value="activity">アクティビティ</TabsTrigger>
+                                <TabsTrigger value="activity">活動ログ</TabsTrigger>
                             </TabsList>
                         </div>
                         <div className="flex flex-1 justify-end items-center">
@@ -262,8 +240,8 @@ export default function AccountPage() {
                                     <div>
                                         <h3 className="font-medium">パスワード</h3>
                                         <p className="text-sm text-gray-500">
-                                            前回の変更: {user.password_changed_at ?
-                                                new Date(user.password_changed_at).toLocaleDateString('ja-JP') :
+                                            前回の変更: {userAuth?.created_at ?
+                                                new Date(userAuth.created_at).toLocaleDateString('ja-JP') :
                                                 '不明'}
                                         </p>
                                     </div>
@@ -316,7 +294,7 @@ export default function AccountPage() {
                                 )}
                                 </div>
 
-                                <div className="flex justify-between items-center">
+                                {/* <div className="flex justify-between items-center">
                                     <div>
                                         <h3 className="font-medium">ログインデバイス</h3>
                                         <p className="text-sm text-gray-500">
@@ -326,7 +304,7 @@ export default function AccountPage() {
                                     <Button variant="outline">
                                         デバイスを管理
                                     </Button>
-                                </div>
+                                </div> */}
                                 <div className="flex justify-between items-center">
                                     <div>
                                         <h3 className="font-medium">セッション管理</h3>

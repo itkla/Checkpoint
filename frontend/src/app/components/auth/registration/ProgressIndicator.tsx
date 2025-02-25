@@ -7,10 +7,8 @@ interface ProgressIndicatorProps {
 }
 
 export function ProgressIndicator({ steps, currentStep }: ProgressIndicatorProps) {
-    // Calculate progress percentage; if there's only one step, avoid division by zero.
-    const progressPercent = steps.length > 1
-        ? Math.min((currentStep / (steps.length - 1)) * 100, 100)
-        : 100;
+    // Calculate progress percentage; if there's only one step, avoid division by zero. Otherwise, set progress to 0.
+    const progressPercent = steps.length > 1 ? (currentStep / (steps.length - 1)) * 100 : 0;
 
     // Get the current step title for display
     const currentTitle = steps[currentStep]?.title || '';

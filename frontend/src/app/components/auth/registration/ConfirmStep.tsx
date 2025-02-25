@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button';
 import { AuthState } from '@/app/types/auth';
 import { api } from '@/lib/api-client';
 import { useToast } from '@/hooks/use-toast';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import Image from 'next/image';
 import {
     CheckCircleIcon,
     ExclamationTriangleIcon,
@@ -21,6 +22,10 @@ export function ConfirmStep({
     onBack,
     onComplete,
 }: ConfirmStepProps) {
+    // get 'next' url param to redirect client after successful registration
+    const searchParams = useSearchParams();
+    const next = searchParams.get('next');
+
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [requiresVerification, setRequiresVerification] = useState(false);
     const { toast } = useToast();
@@ -63,7 +68,11 @@ export function ConfirmStep({
                 }
 
                 onComplete();
-                router.push('/me');
+                if (next) {
+                    router.push(next);
+                } else {
+                    router.push('/me');
+                }
             }
         } catch (error: any) {
             toast({
@@ -121,35 +130,60 @@ export function ConfirmStep({
         <StepLayout title="登録内容の確認" description="入力内容を確認してください" onBack={onBack}>
             <div className="space-y-6">
                 <div className="bg-gray-50 rounded-lg p-6 space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <h3 className="text-sm font-medium text-gray-500">メールアドレス</h3>
-                            <p className="mt-1">{registrationData.email}</p>
-                        </div>
-                        <div>
-                            <h3 className="text-sm font-medium text-gray-500">認証方法</h3>
-                            <p className="mt-1">
-                                {registrationData.authMethod === 'password' && 'パスワード'}
-                                {registrationData.authMethod === 'passkey' && 'パスキー'}
-                                {registrationData.authMethod === 'sso' && 'SSO認証'}
-                            </p>
-                        </div>
-                        {registrationData.profile && (
-                            <>
-                                <div>
-                                    <h3 className="text-sm font-medium text-gray-500">氏名</h3>
-                                    <p className="mt-1">
-                                        {registrationData.profile.last_name} {registrationData.profile.first_name}
-                                    </p>
-                                </div>
-                                {registrationData.profile.department && (
-                                    <div>
-                                        <h3 className="text-sm font-medium text-gray-500">部署</h3>
-                                        <p className="mt-1">{registrationData.profile.department}</p>
-                                    </div>
-                                )}
-                            </>
+                    <div className="flex items-center space-x-2 text-xl">
+                        {/* <CheckCircleIcon className="h-6 w-6 text-green-500" /> */}
+                        {registrationData.preview && (
+                            <Image
+                                src={registrationData.preview}
+                                alt="Profile Preview"
+                                width={64}
+                                height={64}
+                            />
                         )}
+                        {registrationData.profile?.last_name} {registrationData.profile?.first_name}
+                    </div>
+                    <div className="grid grid-cols-1 gap-4">
+                        <div>
+                            <h3 className="text-sm font-medium text-gray-500">基本情報</h3>
+                            <p className="text-sm">メールアドレス: {registrationData.email}</p>
+                            <p className="text-sm">認証方法: {registrationData.authMethod}</p>
+                        </div>
+
+                        <div>
+                            <h3 className="text-sm font-medium text-gray-500">プロフィール</h3>
+                            <p className="text-sm">
+                                氏名: {registrationData.profile?.last_name} {registrationData.profile?.first_name}
+                            </p>
+                            <p className="text-sm">電話番号: {registrationData.profile?.phone}</p>
+                            <p className="text-sm">
+                                生年月日:{' '}
+                                {registrationData.profile?.dateOfBirth &&
+                                    new Date(registrationData.profile.dateOfBirth).toLocaleDateString()}
+                            </p>
+                            {registrationData.profile?.department && (
+                                <p className="text-sm">部署: {registrationData.profile.department}</p>
+                            )}
+                        </div>
+
+                        <div>
+                            <h3 className="text-sm font-medium text-gray-500">住所</h3>
+                            <p className="text-sm">
+                                〒{registrationData.profile?.address?.zip}{' '}
+                                {registrationData.profile?.address?.state}{' '}
+                                {registrationData.profile?.address?.city}
+                            </p>
+                            <p className="text-sm">
+                                {registrationData.profile?.address?.street}{' '}
+                                {registrationData.profile?.address?.street2}
+                            </p>
+                            <p className="text-sm">{registrationData.profile?.address?.country}</p>
+                        </div>
+
+                        {/* <div>
+                            <h3 className="text-sm font-medium text-gray-500">パスワード</h3>
+                            <p className="text-sm">パスワード: {registrationData.password}</p>
+                            <p className="text-sm">パスワード（確認）: {registrationData.confirmPassword}</p>
+                        </div> */}
                     </div>
                     {registrationData.preview && (
                         <div>

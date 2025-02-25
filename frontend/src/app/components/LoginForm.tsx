@@ -5,6 +5,7 @@ import { api } from '@/lib/api-client';
 import type { LoginCredentials } from '@/app/types/user';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { PasskeyButton } from '@/app/components/auth/PasskeyButton';
 import { useToast } from '@/hooks/use-toast';
 import MFADialog from '@/app/components/MFADialog';
@@ -20,6 +21,7 @@ export function LoginForm() {
     const [tempToken, setTempToken] = useState<string | null>(null);
     const [showMFADialog, setShowMFADialog] = useState(false);
     const searchParams = useSearchParams();
+    const next = searchParams.get('next');
 
     const handlePasswordLogin = async (credentials: { email: string; password: string }) => {
         try {
@@ -31,6 +33,11 @@ export function LoginForm() {
             } else if (response.token) {
                 localStorage.setItem('token', response.token);
                 router.push('/me');
+                // get url query params to redirect to the correct page if set
+                // const redirect = searchParams.get('next');
+                if (next) {
+                    router.push(next);
+                }
             }
         } catch (error: any) {
             toast({
@@ -46,7 +53,11 @@ export function LoginForm() {
             const verification = await api.auth.verify2FALogin({ tempToken: tempToken ?? '', code });
             if (verification.success && verification.token) {
                 localStorage.setItem('token', verification.token);
-                router.push('/dashboard');
+                if (next) {
+                    router.push(next);
+                } else {
+                    router.push('/dashboard');
+                }
             }
         } catch (error: any) {
             toast({
@@ -89,12 +100,12 @@ export function LoginForm() {
             <form onSubmit={handleSubmit} className="space-y-4">
                 <h1 className="text-2xl font-bold">ログイン</h1>
                 <div>
-                    <label
+                    <Label
                         htmlFor="email"
                         className="block text-sm/6 font-medium text-gray-700"
                     >
                         メールアドレス
-                    </label>
+                    </Label>
                     <Input
                         type="email"
                         className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm text-lg"
@@ -111,12 +122,12 @@ export function LoginForm() {
                 </div>
                 <div>
                     <div className="flex items-center justify-between">
-                        <label
+                        <Label
                             htmlFor="password"
                             className="block text-sm/6 font-medium text-gray-900"
                         >
                             パスワード
-                        </label>
+                        </Label>
                         <div className="text-sm">
                             <Link
                                 href="/forgot-password"

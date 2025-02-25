@@ -1,0 +1,34 @@
+// import { NextResponse } from 'next/server';
+// import type { NextRequest } from 'next/server';
+
+// export function middleware(request: NextRequest) {
+//     const { pathname } = request.nextUrl;
+
+//     // Define public paths that do not require authentication.
+//     const publicPaths = ['/login', '/register'];
+
+//     // If the path is public, simply continue.
+//     if (publicPaths.some((publicPath) => pathname.startsWith(publicPath))) {
+//         return NextResponse.next();
+//     }
+
+//     // Read the token from the httpOnly cookie.
+//     const token = request.cookies.get('checkpoint_jwt')?.value;
+
+//     // If no token is found, redirect to /login.
+//     if (!token) {
+//         const loginUrl = request.nextUrl.clone();
+//         loginUrl.pathname = '/login';
+//         return NextResponse.redirect(loginUrl);
+//     }
+
+//     // If token exists, attach it as a custom header for downstream consumption.
+//     const response = NextResponse.next();
+//     response.headers.set('x-checkpoint-token', token);
+//     return response;
+// }
+
+// // Apply middleware to all paths (you can adjust this matcher as needed)
+// export const config = {
+//     matcher: ['/:path*'],
+// };

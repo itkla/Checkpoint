@@ -119,7 +119,7 @@ export function SessionManager({ open, onOpenChange }: {
                         sessions.map((session) => (
                             <div
                                 key={session.id}
-                                className="flex items-center justify-between p-4 border rounded-lg"
+                                className="flex items-center justify-between p-4 border rounded-lg overflow-auto"
                             >
                                 <div className="flex items-center space-x-4">
                                     {getDeviceIcon(session.device)}
