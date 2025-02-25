@@ -20,12 +20,14 @@ export function MethodStep({ onNext, onBack }: MethodStepProps) {
             icon: KeyIcon,
             title: 'パスワード',
             description: '従来のパスワードを使用してログイン',
+            enabled: true,
         },
         {
             type: 'passkey' as AuthMethod,
             icon: FingerPrintIcon,
             title: 'パスキー',
             description: '生体認証や端末のセキュリティ機能を使用',
+            enabled: false,
         },
         {
             type: 'sso' as AuthMethod,
@@ -36,6 +38,7 @@ export function MethodStep({ onNext, onBack }: MethodStepProps) {
                 { id: 'google' as SsoProvider, name: 'Google' },
                 { id: 'line' as SsoProvider, name: 'LINE' },
             ],
+            enabled: false,
         },
     ];
 
@@ -49,30 +52,41 @@ export function MethodStep({ onNext, onBack }: MethodStepProps) {
                 {methods.map((method) => (
                     <Card
                         key={method.type}
-                        className="p-4 cursor-pointer hover:border-blue-500 transition-all"
-                        onClick={() => method.type !== 'sso' && onNext({ authMethod: method.type })}
+                        className={`p-4 transition-all ${
+                            method.enabled 
+                                ? 'cursor-pointer hover:border-blue-500' 
+                                : 'cursor-not-allowed opacity-60'
+                        }`}
+                        onClick={() => method.enabled && method.type !== 'sso' && onNext({ authMethod: method.type })}
+                        title={!method.enabled ? "この認証方法は現在開発中のため利用できません" : undefined}
                     >
                         <div className="flex items-start space-x-4">
-                            <method.icon className="w-6 h-6 text-blue-500" />
+                            <method.icon className={`w-6 h-6 ${method.enabled ? 'text-blue-500' : 'text-gray-400'}`} />
                             <div className="flex-1">
                                 <h3 className="font-medium">{method.title}</h3>
                                 <p className="text-sm text-gray-600">{method.description}</p>
-                                {method.type === 'sso' && (
+                                {method.type === 'sso' && method.enabled && (
                                     <div className="mt-2 flex space-x-2">
                                         {method.providers?.map((provider) => (
                                             <Button
                                                 key={provider.id}
                                                 variant="outline"
                                                 size="sm"
-                                                onClick={() => onNext({
-                                                    authMethod: 'sso',
-                                                    ssoProvider: provider.id,
-                                                })}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    onNext({
+                                                        authMethod: 'sso',
+                                                        ssoProvider: provider.id,
+                                                    });
+                                                }}
                                             >
                                                 {provider.name}
                                             </Button>
                                         ))}
                                     </div>
+                                )}
+                                {!method.enabled && (
+                                    <p className="text-xs mt-1 text-amber-500">このCheckpoint管理者は登録時にこの認証方法を有効にしていません。ただし、登録後に希望の認証方法として変更することができます。</p>
                                 )}
                             </div>
                         </div>

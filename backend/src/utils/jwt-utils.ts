@@ -13,7 +13,6 @@ export async function signToken(
         .sign(secret_key);
 }
 
-/** Verify a JWT. Throws if invalid/expired. Returns the payload if valid. */
 export async function verifyToken(token: string): Promise<any> {
     const { payload } = await jwtVerify(token, secret_key);
     return payload;

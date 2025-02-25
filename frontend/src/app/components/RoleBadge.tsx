@@ -1,4 +1,3 @@
-// components/RoleBadge.tsx
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
     UserIcon,

@@ -1,4 +1,3 @@
-// components/MFADialog.tsx
 import React, { useState } from 'react';
 import {
     Dialog,
@@ -7,6 +6,15 @@ import {
     DialogTitle,
     DialogFooter
 } from '@/app/components/ui/dialog';
+
+import {
+    InputOTP,
+    InputOTPGroup,
+    InputOTPSeparator,
+    InputOTPSlot,
+} from "@/components/ui/input-otp"
+
+import { Button } from '@/components/ui/button';
 
 interface MFADialogProps {
     isOpen: boolean;
@@ -40,36 +48,41 @@ export const MFADialog: React.FC<MFADialogProps> = ({
                     <p className="text-sm text-gray-500 mb-4">
                         認証アプリで生成された6桁のコードを入力してください。
                     </p>
-                    <input
-                        type="text"
-                        value={code}
-                        onChange={(e) => setCode(e.target.value)}
-                        className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-                        placeholder="000000"
-                        pattern="[0-9]*"
-                        maxLength={6}
-                        autoComplete="one-time-code"
-                        required
-                        disabled={isLoading}
-                    />
+                    <div className="mt-1 items-center justify-center flex">
+                        <InputOTP 
+                            maxLength={6} 
+                            value={code} 
+                            onChange={setCode} 
+                            disabled={isLoading}
+                        >
+                            <InputOTPGroup>
+                                <InputOTPSlot index={0} />
+                                <InputOTPSlot index={1} />
+                                <InputOTPSlot index={2} />
+                                <InputOTPSlot index={3} />
+                                <InputOTPSlot index={4} />
+                                <InputOTPSlot index={5} />
+                            </InputOTPGroup>
+                        </InputOTP>
+                    </div>
                 </DialogContent>
 
                 <DialogFooter>
-                    <button
+                    <Button
                         type="button"
                         onClick={onClose}
                         className="inline-flex justify-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
                         disabled={isLoading}
                     >
                         キャンセル
-                    </button>
-                    <button
+                    </Button>
+                    <Button
                         type="submit"
-                        className="inline-flex justify-center px-4 py-2 text-sm font-medium text-white bg-blue-500 border border-transparent rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                        className="inline-flex justify-center px-4 py-2 text-sm font-medium text-white border border-transparent rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
                         disabled={isLoading}
                     >
                         {isLoading ? '確認中...' : '確認'}
-                    </button>
+                    </Button>
                 </DialogFooter>
             </form>
         </Dialog>

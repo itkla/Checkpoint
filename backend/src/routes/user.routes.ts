@@ -22,12 +22,10 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
         },
     });
     
-    // get all users
     server.get('/', {
         onRequest: [server.authenticate],
         handler: async (request, reply) => {
             try {
-                // If you want to restrict this to admins, do an additional check here:
                 console.log(`Received request from user ${request.jwtUser.userId} on route GET /api/users`);
                 const canSearch = await hasPermission(String(request.jwtUser.userId), 'users.search');
                 if (canSearch) {
@@ -43,25 +41,49 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
                     pageSize?: number;
                 };
                 const offset = (page - 1) * pageSize;
-                const likeQuery = `%${search || ''}%`;
-    
+                
                 try {
-                    const result = await pool.query(
-                        `
-                        SELECT *
+                    let query;
+                    let params;
+                    
+                    // If search parameter is provided, filter results
+                    if (search && search.trim() !== '') {
+                        const likeQuery = `%${search}%`;
+                        query = `
+                            SELECT *
                             FROM users
-                        WHERE email ILIKE $1
-                            OR first_name ILIKE $1
-                            OR last_name ILIKE $1
-                        ORDER BY created_at DESC
-                        LIMIT $2 OFFSET $3
-                        `,
-                        [encryptPII(likeQuery), pageSize, offset]
-                    );
-                    // for each result, parse each row as UserSchema then add to outgoing array
-                    console.log(result.rows);
-                    const _outgoing = result.rows.map((row) => {
-                        let json_encoded_address = JSON.parse(row.address);
+                            WHERE email ILIKE $1
+                                OR first_name ILIKE $1
+                                OR last_name ILIKE $1
+                            ORDER BY created_at DESC
+                            LIMIT $2 OFFSET $3
+                        `;
+                        params = [encryptPII(likeQuery), pageSize, offset];
+                    } else {
+                        // If no search parameter, return all users with pagination
+                        query = `
+                            SELECT *
+                            FROM users
+                            ORDER BY created_at DESC
+                            LIMIT $1 OFFSET $2
+                        `;
+                        params = [pageSize, offset];
+                    }
+    
+                    const result = await pool.query(query, params);
+                    // console.log(result.rows);
+                    
+                    // Also get total count for pagination
+                    const countQuery = search && search.trim() !== '' 
+                        ? `SELECT COUNT(*) FROM users WHERE email ILIKE $1 OR first_name ILIKE $1 OR last_name ILIKE $1`
+                        : `SELECT COUNT(*) FROM users`;
+                        
+                    const countParams = search && search.trim() !== '' ? [encryptPII(`%${search}%`)] : [];
+                    const countResult = await pool.query(countQuery, countParams);
+                    const totalCount = parseInt(countResult.rows[0].count);
+                    
+                    const _outgoing = result.rows.map((row: any) => {
+                        let json_encoded_address = JSON.parse(decryptPII(row.address));
                         let parsedResult = {
                             id: row.id,
                             email: row.email,
@@ -74,18 +96,29 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
                                 profile_picture: row.profile_picture || '',
                                 dateOfBirth: decryptPII(row.dateofbirth),
                                 phone: decryptPII(row.phone_number),
-                                address: decryptPII(json_encoded_address),
+                                address: json_encoded_address,
                             },
                         };
                         return UserSchema.parse(parsedResult);
                     });
-                    // console.log(_outgoing);
-                    reply.send(_outgoing);
+                    console.log(_outgoing);
+                    
+                    reply.send({
+                        users: _outgoing,
+                        pagination: {
+                            total: totalCount,
+                            page,
+                            pageSize,
+                            pages: Math.ceil(totalCount / pageSize)
+                        }
+                    });
                 } catch (err) {
+                    console.error('An error occurred:', err);
                     reply.status(500).send({ error: 'Database error' });
                 }
             } catch (err) {
-                reply.status(500).send({ error: 'Database error' });
+                console.error('Server error:', err);
+                reply.status(500).send({ error: 'Server error' });
             }
         },
     });
@@ -108,7 +141,6 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
                 if (profile.rowCount === 0) {
                     return reply.status(404).send({ error: 'User not found' });
                 }
-                // console.log(profile.rows[0]);
                 let json_encoded_address = JSON.parse(decryptPII(profile.rows[0].address));
                 let parsedResult = {
                     id: profile.rows[0].id,
@@ -125,7 +157,6 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
                         address: json_encoded_address,
                     },
                 };
-                // console.log("parsedResult: ", parsedResult);
                 let outgoing_ = {
                     user: UserSchema.parse(parsedResult),
                     auth: auth.rows,
@@ -137,24 +168,20 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
             }
         }
     });
-    
-    // get user's profile
     server.get('/:id', {
         onRequest: [server.authenticate],
         handler: async (request, reply) => {
             const { id } = request.params as { id: string };
             try {
-                // only allow users to view their own profile, or admins to view any profile
                 if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
                     return reply.status(403).send({ error: 'Forbidden' });
                 }
-    
+
                 const result = await pool.query(
                     'SELECT * FROM users WHERE id = $1',
                     [id]
                 );
                 console.log(result.rows[0]);
-                // console.log(result.rows[0]);
                 let json_encoded_address = JSON.parse(decryptPII(result.rows[0].address));
                 let parsedResult = {
                     id: result.rows[0].id,
@@ -173,16 +200,12 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
                 };
                 let outgoing_ = UserSchema.parse(parsedResult);
                 console.log(outgoing_);
-    
-                // get date time last changed password
                 const password_changed_at = await pool.query(
                     'SELECT created_at FROM auth_methods WHERE user_id = $1 AND type = $2',
                     [id, 'password']
                 );
-    
-                // store last password change date in the first row
                 outgoing_.password_changed_at = password_changed_at.rows[0]?.created_at;
-    
+
                 if (!outgoing_) {
                     return reply.status(404).send({ error: 'User not found' });
                 }
@@ -192,66 +215,73 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
             }
         },
     });
-    
-    // update user's profile
+
     server.put('/:id', {
         onRequest: [server.authenticate],
         handler: async (request, reply) => {
             const { id } = request.params as { id: string };
             console.log(`Received request from user ${request.jwtUser.userId} on route PUT /api/users/${id}`);
-            console.log(`Data to update: ${request.body}`);
-            const toUpdate = UserSchema.parse(request.body);
-            console.log(`Data to update: ${toUpdate}`);
-    
+            console.log('Data to update:', JSON.stringify(request.body, null, 2));
+
+            console.log(`Comparing: JWT userId (${typeof request.jwtUser.userId}) ${request.jwtUser.userId} vs. param id (${typeof id}) ${id}`);
             try {
-                if (request.jwtUser.userId !== id || !request.jwtUser.isAdmin) {
-                    return reply.status(403).send({ error: 'Forbidden' });
-                }
+                const toUpdate = UserSchema.parse(request.body);
+                try {
+                    if (String(request.jwtUser.userId) !== String(id) && !request.jwtUser.isAdmin) {
+                        return reply.status(403).send({ error: 'Forbidden' });
+                    }
+                    const addressString = typeof toUpdate.profile.address === 'object'
+                        ? JSON.stringify(toUpdate.profile.address)
+                        : toUpdate.profile.address;
+
+                    const dob = (toUpdate.profile.dateOfBirth as Date).toISOString();
     
-                const result = await pool.query(
-                    `UPDATE users 
-                     SET email = $1, 
-                         first_name = $2, 
-                         last_name = $3, 
-                         dateOfBirth = $4, 
-                         phone_number = $5, 
-                         address = $6, 
-                         profile_picture = $7 
-                     WHERE id = $8 RETURNING *`,
-                    [
-                        toUpdate.email,
-                        encryptPII(toUpdate.profile.first_name),
-                        encryptPII(toUpdate.profile.last_name),
-                        encryptPII(toUpdate.profile.dateOfBirth),
-                        encryptPII(toUpdate.profile.phone),
-                        encryptPII(toUpdate.profile.address),
-                        toUpdate.profile.profile_picture,
-                        id
-                    ]
-                );
-                if (result.rowCount === 0) {
-                    return reply.status(404).send({ error: 'User not found' });
-                }
-                reply.send(result.rows[0]);
+                    const result = await pool.query(
+                        `UPDATE users 
+                         SET email = $1, 
+                             first_name = $2, 
+                             last_name = $3, 
+                             dateOfBirth = $4, 
+                             phone_number = $5, 
+                             address = $6, 
+                             profile_picture = $7 
+                         WHERE id = $8 RETURNING *`,
+                        [
+                            toUpdate.email,
+                            encryptPII(toUpdate.profile.first_name),
+                            encryptPII(toUpdate.profile.last_name),
+                            encryptPII(dob),
+                            encryptPII(toUpdate.profile.phone),
+                            encryptPII(addressString), // Use the stringified address
+                            toUpdate.profile.profile_picture,
+                            id
+                        ]
+                    );
+                    if (result.rowCount === 0) {
+                        return reply.status(404).send({ error: 'User not found' });
+                    }
+                    reply.send(result.rows[0]);
+                } catch (err) {
+                    console.error(err);
+                    reply.status(500).send({ error: 'Database error' });
+                };
             } catch (err) {
-                reply.status(500).send({ error: 'Database error' });
-            };
+                console.error(err);
+                return reply.status(400).send({ error: 'Invalid data' });
+            }
         }
     });
-    
-    // delete user
-    
+
     server.delete('/:id', {
         onRequest: [server.authenticate],
         handler: async (request, reply) => {
             const { id } = request.params as { id: string };
             // const requester_permissions = getUserPermissions(String(request.jwtUser.userId));
             try {
-                // allow user to delete their own account, or an admin to delete any account
                 if (request.jwtUser.userId !== id && !hasPermission(String(request.jwtUser.userId), 'users.delete')) {
                     return reply.status(403).send({ error: 'Forbidden' });
                 }
-    
+
                 const result = await pool.query(
                     'DELETE FROM users WHERE id = $1 RETURNING id',
                     [id]
@@ -266,8 +296,7 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
             }
         },
     });
-    
-    // get user's auth methods
+
     server.get('/:id/auth-methods', {
         onRequest: [server.authenticate],
         handler: async (request, reply) => {
@@ -276,7 +305,7 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
                 if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
                     return reply.status(403).send({ error: 'Forbidden' });
                 }
-    
+
                 const result = await pool.query(
                     `
                 SELECT id, type, is_preferred, metadata, created_at, last_used_at
@@ -317,8 +346,7 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
             }
         },
     });
-    
-    // add auth method to user
+
     server.post('/:id/auth-methods', {
         onRequest: [server.authenticate],
         handler: async (request, reply) => {
@@ -328,12 +356,12 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
                 is_preferred?: boolean;
                 metadata?: any;
             };
-    
+
             try {
                 if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
                     return reply.status(403).send({ error: 'Forbidden' });
                 }
-    
+
                 const result = await pool.query(
                     `
                 INSERT INTO auth_methods (user_id, type, is_preferred, metadata)
@@ -351,8 +379,7 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
             }
         },
     });
-    
-    // update auth method
+
     server.get('/:id/sso', {
         onRequest: [server.authenticate],
         handler: async (request, reply) => {
@@ -361,7 +388,7 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
                 // if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
                 //   return reply.status(403).send({ error: 'Forbidden' });
                 // }
-    
+
                 const result = await pool.query(
                     `
                 SELECT usc.id,
@@ -381,19 +408,18 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
             }
         },
     });
-    
-    // add sso connection to user
+
     server.post('/:id/sso', {
         onRequest: [server.authenticate],
         handler: async (request, reply) => {
             const { id } = request.params as UserIdParam;
             const { provider_id, external_user_id } = request.body as SsoConnectionBody;
-    
+
             try {
                 // if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
                 //   return reply.status(403).send({ error: 'Forbidden' });
                 // }
-    
+
                 const result = await pool.query(
                     `
                 INSERT INTO user_sso_connections (user_id, provider_id, external_user_id)
@@ -416,19 +442,18 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
             }
         },
     });
-    
-    // add role to user
+
     server.post('/:id/role', {
         onRequest: [server.authenticate],
         handler: async (request, reply) => {
             const { id } = request.params as UserIdParam;
             const { roleId } = request.body as RoleIdBody;
-    
+
             try {
                 if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
                     return reply.status(403).send({ error: 'Forbidden' });
                 }
-    
+
                 await pool.query(
                     `
                 INSERT INTO user_roles (user_id, role_id)
@@ -447,19 +472,18 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
             }
         },
     });
-    
-    // remove role from user
+
     server.delete('/:id/role', {
         onRequest: [server.authenticate],
         handler: async (request, reply) => {
             const { id } = request.params as UserIdParam;
             const { roleId } = request.body as RoleIdBody;
-    
+
             try {
                 if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
                     return reply.status(403).send({ error: 'Forbidden' });
                 }
-    
+
                 const result = await pool.query(
                     'DELETE FROM user_roles WHERE user_id = $1 AND role_id = $2 RETURNING user_id, role_id',
                     [id, roleId]
@@ -473,8 +497,7 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
             }
         },
     });
-    
-    // get user's roles
+
     server.get('/:id/roles', {
         onRequest: [server.authenticate],
         handler: async (request, reply) => {
@@ -483,7 +506,7 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
                 if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
                     return reply.status(403).send({ error: 'Forbidden' });
                 }
-    
+
                 const result = await pool.query(
                     `
                 SELECT r.id, r.name, r.description
@@ -499,9 +522,7 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
             }
         },
     });
-    
-    // user profile picture
-    
+
     server.post('/:id/profile-pic', {
         onRequest: [server.authenticate],
         handler: async (request, reply) => {
@@ -516,18 +537,15 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
                 console.error(`No file uploaded for user ${id}`);
                 return reply.status(400).send({ error: 'No file uploaded' });
             }
-    
-            // Read file buffer
+
             const buffer = await file.toBuffer();
-    
-            // Convert to base64 string for storage
             const profile_picture = buffer.toString('base64');
-    
+
             try {
                 if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
                     return reply.status(403).send({ error: 'Forbidden' });
                 }
-    
+
                 const result = await pool.query(
                     'UPDATE users SET profile_picture = $1 WHERE id = $2 RETURNING id, profile_picture',
                     [profile_picture, id]
@@ -535,7 +553,6 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
                 if (result.rowCount === 0) {
                     return reply.status(404).send({ error: 'User not found' });
                 } else {
-                    // save the image to the file system
                     try {
                         fs.writeFileSync(`../public/profile_images/${id}.png`, buffer);
                     } catch (err) {
@@ -549,8 +566,7 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
             }
         },
     });
-    
-    // get user's profile picture
+
     server.get('/:id/profile-picture', {
         onRequest: [server.authenticate],
         handler: async (request, reply) => {
@@ -573,8 +589,7 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
             }
         },
     });
-    
-    // update user's profile picture
+
     server.put('/:id/profile-picture', {
         onRequest: [server.authenticate],
         handler: async (request, reply) => {
@@ -584,18 +599,14 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
             if (!file) {
                 return reply.status(400).send({ error: 'No file uploaded' });
             }
-    
-            // Read file buffer
             const buffer = await file.toBuffer();
-    
-            // Convert to base64 string for storage
             const profile_picture = buffer.toString('base64');
-    
+
             try {
                 if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
                     return reply.status(403).send({ error: 'Forbidden' });
                 }
-    
+
                 const result = await pool.query(
                     'UPDATE users SET profile_picture = $1 WHERE id = $2 RETURNING id, profile_picture',
                     [profile_picture, id]
@@ -603,7 +614,6 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
                 if (result.rowCount === 0) {
                     return reply.status(404).send({ error: 'User not found' });
                 } else {
-                    // save the image to the file system
                     try {
                         fs.writeFileSync(`../public/profile_images/${id}.png`, buffer);
                     } catch (err) {
@@ -617,8 +627,7 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
             }
         },
     });
-    
-    // delete user's profile picture
+
     server.delete('/:id/profile-picture', {
         onRequest: [server.authenticate],
         handler: async (request, reply) => {
@@ -627,7 +636,7 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
                 if (request.jwtUser.userId !== id && !request.jwtUser.isAdmin) {
                     return reply.status(403).send({ error: 'Forbidden' });
                 }
-    
+
                 const result = await pool.query(
                     'UPDATE users SET profile_picture = NULL WHERE id = $1 RETURNING id',
                     [id]
@@ -635,7 +644,6 @@ export const userRoutes: FastifyPluginAsync = async (server, opts) => {
                 if (result.rowCount === 0) {
                     return reply.status(404).send({ error: 'User not found' });
                 } else {
-                    // delete the image from the file system
                     try {
                         fs.unlinkSync(`../public/profile_images/${id}.png`);
                     } catch (err) {

@@ -8,9 +8,16 @@ import {
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { api } from '@/lib/api-client';
-import { FingerPrintIcon, TrashIcon, PlusIcon } from '@heroicons/react/24/outline';
+import { Fingerprint, Trash, Plus } from 'lucide-react';
 import { PasskeyRegistration } from './PasskeyRegistration';
 import { exportCredential, importCredential } from '@/lib/webauthn';
+import { 
+    DropdownMenu, 
+    DropdownMenuTrigger, 
+    DropdownMenuContent, 
+    DropdownMenuItem 
+} from "@/components/ui/dropdown-menu";
+import { MoreVertical, FileInput, FileOutput } from "lucide-react";
 
 interface Passkey {
     id: string;
@@ -32,7 +39,6 @@ export function PasskeyManager({ open, onOpenChange }: {
     const fetchPasskeys = async () => {
         try {
             const response = await api.auth.getPasskeys();
-            // Ensure we always have an array, even if empty
             setPasskeys(Array.isArray(response) ? response : []);
         } catch (error) {
             console.error('Error fetching passkeys:', error);
@@ -67,7 +73,7 @@ export function PasskeyManager({ open, onOpenChange }: {
     const handleExport = async (credentialId: string) => {
         try {
             const exportedKey = await exportCredential(credentialId);
-            // Create and download a JSON file
+
             const blob = new Blob([JSON.stringify(exportedKey)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -75,7 +81,13 @@ export function PasskeyManager({ open, onOpenChange }: {
             a.download = 'passkey-backup.json';
             a.click();
             URL.revokeObjectURL(url);
+            
+            toast({
+                title: "成功",
+                description: "パスキーをエクスポートしました",
+            });
         } catch (error) {
+            console.error('Export error:', error);
             toast({
                 title: "エラー",
                 description: "パスキーのエクスポートに失敗しました",
@@ -95,18 +107,28 @@ export function PasskeyManager({ open, onOpenChange }: {
 
                 const reader = new FileReader();
                 reader.onload = async (e) => {
-                    const credentialData = JSON.parse(e.target?.result as string);
-                    await importCredential(credentialData);
-                    fetchPasskeys(); // Refresh the list
-                    toast({
-                        title: "成功",
-                        description: "パスキーを輸入しました",
-                    });
+                    try {
+                        const credentialData = JSON.parse(e.target?.result as string);
+                        await importCredential(credentialData);
+                        fetchPasskeys(); // Refresh the list
+                        toast({
+                            title: "成功",
+                            description: "パスキーをインポートしました",
+                        });
+                    } catch (error) {
+                        console.error('Import parsing error:', error);
+                        toast({
+                            title: "エラー",
+                            description: "無効なパスキーデータです",
+                            variant: "destructive",
+                        });
+                    }
                 };
                 reader.readAsText(file);
             };
             input.click();
         } catch (error) {
+            console.error('Import error:', error);
             toast({
                 title: "エラー",
                 description: "パスキーのインポートに失敗しました",
@@ -124,22 +146,21 @@ export function PasskeyManager({ open, onOpenChange }: {
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                    <DialogTitle>パスキー管理</DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4">
+            <DialogHeader>
+                <DialogTitle>パスキー管理</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+                <div className="flex gap-2">
                     <Button
-                        className="w-full"
+                        className="flex-1"
                         onClick={() => setShowRegistration(true)}
                     >
-                        <PlusIcon className="w-5 h-5 text-white" /> パスキー
+                        <Plus className="w-5 h-5 mr-2" /> 新しいパスキー
                     </Button>
-                    <Button
-                        variant="outline"
-                        onClick={handleImport}
-                    >
-                        輸入
+                    <Button variant="outline" size="icon" onClick={handleImport}>
+                        <FileInput className="h-4 w-4" />
                     </Button>
+                </div>
                     {isLoading ? (
                         <div className="flex justify-center py-4">
                             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
@@ -157,7 +178,7 @@ export function PasskeyManager({ open, onOpenChange }: {
                                         className="flex items-center justify-between p-4 border rounded-lg"
                                     >
                                         <div className="flex items-center space-x-3">
-                                            <FingerPrintIcon className="w-5 h-5 text-gray-500" />
+                                            <Fingerprint className="w-5 h-5 text-gray-500" />
                                             <div>
                                                 <p className="font-medium">{passkey.name}</p>
                                                 <p className="text-sm text-gray-500">
@@ -166,18 +187,33 @@ export function PasskeyManager({ open, onOpenChange }: {
                                                         <> • 最終使用: {new Date(passkey.lastUsed).toLocaleDateString('ja-JP')}</>
                                                     )}
                                                 </p>
-                                                <p className="text-sm text-gray-500">
+                                                <p className="text-xs text-gray-400 truncate max-w-[200px]">
                                                     ID: {passkey.credentialId}
                                                 </p>
                                             </div>
                                         </div>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => deletePasskey(passkey.credentialId)}
-                                        >
-                                            <TrashIcon className="w-4 h-4 text-red-500" />
-                                        </Button>
+                                        <div className="flex items-center">
+                                            <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                    <Button variant="ghost" size="sm">
+                                                        <MoreVertical className="h-4 w-4" />
+                                                    </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                    <DropdownMenuItem onClick={() => handleExport(passkey.credentialId)}>
+                                                        <FileOutput className="w-4 h-4 mr-2" />
+                                                        エクスポート
+                                                    </DropdownMenuItem>
+                                                    <DropdownMenuItem 
+                                                        onClick={() => deletePasskey(passkey.credentialId)}
+                                                        className="text-red-500"
+                                                    >
+                                                        <Trash className="w-4 h-4 mr-2" />
+                                                        削除
+                                                    </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                            </DropdownMenu>
+                                        </div>
                                     </div>
                                 ))
                             )}

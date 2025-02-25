@@ -1,4 +1,3 @@
-// types/user.ts
 export interface User {
     id: string;
     email: string;
@@ -57,7 +56,6 @@ export interface PasskeyCredential {
     type: 'public-key';
 }
 
-// Add any other related types here
 export interface UserAuthMethod {
     id: string;
     type: 'password' | 'passkey' | 'biometric' | 'sso';

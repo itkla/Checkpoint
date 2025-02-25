@@ -1,12 +1,9 @@
-// types/auth.ts
 import { date, z } from "zod";
 import { isPasswordValid } from "@/lib/passwordValidation";
 
-// Basic validation patterns
 const passwordPattern = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
 const phonePattern = /^(\+?\d{1,4}[-.\s]?)?(\(?\d{1,3}\)?[-.\s]?)?\d{1,4}[-.\s]?\d{1,4}[-.\s]?\d{1,9}$/;
 
-// Email validation schema
 export const emailSchema = z.object({
     email: z
         .string()
@@ -15,7 +12,6 @@ export const emailSchema = z.object({
         .max(255, "メールアドレスが長すぎます"),
 });
 
-// Password validation schema with enhanced rules
 export const passwordSchema = z.object({
     password: z.string().refine(val => isPasswordValid(val), {
         message: "パスワードは8文字以上で、大文字、小文字、数字、特殊文字を含む必要があります",
@@ -26,7 +22,6 @@ export const passwordSchema = z.object({
     path: ["confirmPassword"],
 });
 
-// User profile schema
 export const userProfileSchema = z.object({
     first_name: z.string().min(1, "名前は必須です").max(50, "名前が長すぎます"),
     last_name: z.string().min(1, "姓は必須です").max(50, "姓が長すぎます"),
@@ -44,16 +39,12 @@ export const userProfileSchema = z.object({
     }).optional()
 });
 
-// Combined registration schema
 export const registrationSchema = emailSchema.merge(passwordSchema.innerType()).merge(userProfileSchema);
 
-// Types derived from schemas
 export type EmailData = z.infer<typeof emailSchema>;
 export type PasswordData = z.infer<typeof passwordSchema>;
 export type UserProfileData = z.infer<typeof userProfileSchema>;
 export type RegistrationData = z.infer<typeof registrationSchema>;
-
-// Authentication method types
 export type AuthMethod = 'password' | 'passkey' | 'sso';
 export type SsoProvider = 'google' | 'line';
 
@@ -65,8 +56,6 @@ export interface AuthState {
     profile?: UserProfileData;
     passkeyCredential?: any;
 }
-
-// Progress tracking
 export type RegistrationStep = 'email' | 'method' | 'profile' | 'details' | 'confirm';
 
 export interface StepConfig {
@@ -102,8 +91,6 @@ export const registrationSteps: StepConfig[] = [
         description: '入力内容を確認してください',
     },
 ];
-
-// Password reset types
 export interface ResetPasswordData {
     token: string;
     newPassword: string;
@@ -117,8 +104,6 @@ export const resetPasswordSchema = z.object({
     message: "パスワードが一致しません",
     path: ["confirmPassword"],
 });
-
-// Error types
 export interface ApiError {
     message: string;
     code: string;
@@ -157,8 +142,6 @@ export interface PasskeyCredential {
     };
     type: 'public-key';
 }
-
-// Add any other related types here
 export interface UserAuthMethod {
     id: string;
     type: 'password' | 'passkey' | 'biometric' | 'sso';

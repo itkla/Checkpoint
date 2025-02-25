@@ -49,7 +49,6 @@ export function ProfileStep({ initialProfile, onNext, onBack }: ProfileStepProps
         if (profilePicture) {
             const objectUrl = URL.createObjectURL(profilePicture);
             setPreview(objectUrl);
-            // Free memory when component unmounts or file changes.
             return () => URL.revokeObjectURL(objectUrl);
         }
     }, [profilePicture]);
@@ -66,7 +65,6 @@ export function ProfileStep({ initialProfile, onNext, onBack }: ProfileStepProps
             />
             <Form {...form}>
                 <form onSubmit={form.handleSubmit(data => {
-                    // Pass along profile data along with picture info
                     onNext({ ...data, profilePicture, preview });
                 })} className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">

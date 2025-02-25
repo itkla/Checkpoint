@@ -5,7 +5,6 @@ export default function Navbar() {
         <header className="bg-white shadow-lg px-8 py-4 flex items-center justify-between">
             <img src="/logo.svg" className="w-48" />
             <div className="flex items-center space-x-8">
-                {/* Adjust or add any header items here */}
                 <SignOutButton />
             </div>
         </header>

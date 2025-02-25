@@ -47,7 +47,6 @@ export const rolesRoutes: FastifyPluginAsync = async (server, opts): Promise<voi
         onRequest: [server.authenticate],
         handler: async (request, reply) => {
             const userId = request.jwtUser.userId;
-            // Only an admin can do this
             if (!(await hasPermission(String(userId), 'roles.update'))) {
                 return reply.status(403).send({ error: 'Forbidden' });
             }
@@ -56,15 +55,12 @@ export const rolesRoutes: FastifyPluginAsync = async (server, opts): Promise<voi
             const { permissionsToAdd } = request.body as { permissionsToAdd: string[] };
     
             try {
-                // 1) Get current permissions from DB
                 const rRes = await pool.query(`SELECT permissions FROM roles WHERE id = $1`, [roleId]);
                 if (rRes.rowCount === 0) {
                     return reply.status(404).send({ error: 'Role not found' });
                 }
                 let perms = rRes.rows[0].permissions || [];
-                // 2) Merge in the new perms
                 perms = Array.from(new Set([...perms, ...permissionsToAdd])); // deduplicate
-                // 3) Update
                 await pool.query(`UPDATE roles SET permissions = $1 WHERE id = $2`, [JSON.stringify(perms), roleId]);
                 reply.send({ success: true, updatedPermissions: perms });
             } catch (err) {

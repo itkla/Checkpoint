@@ -26,7 +26,6 @@ export default function LoginFlow() {
 
     const handlePasskeyRegistration = async () => {
         try {
-            // Start registration
             const optionsResponse = await fetch(
                 `${process.env.NEXT_PUBLIC_API_URL}/api/auth/passkey/register/start`,
                 {
@@ -37,11 +36,7 @@ export default function LoginFlow() {
             );
 
             const options = await optionsResponse.json();
-
-            // Create passkey
             const regResponse = await startRegistration(options);
-
-            // Complete registration
             const verificationResponse = await fetch(
                 `${process.env.NEXT_PUBLIC_API_URL}/api/auth/passkey/register/complete`,
                 {
@@ -76,7 +71,7 @@ export default function LoginFlow() {
         }
 
         try {
-            // Similar to passkey flow but with biometric-specific options
+            // ...
         } catch (err) {
             console.error(err);
             setError('Biometric authentication failed');
@@ -99,7 +94,6 @@ export default function LoginFlow() {
                 >
                     {method.type === 'sso' && (
                         <div className="flex items-center">
-                            {/* Add provider logos */}
                             <span>Continue with {method.metadata?.provider}</span>
                         </div>
                     )}
@@ -121,7 +115,6 @@ export default function LoginFlow() {
                 </button>
             ))}
 
-            {/* Always show SSO options */}
             <div className="mt-6">
                 <div className="relative">
                     <div className="absolute inset-0 flex items-center">

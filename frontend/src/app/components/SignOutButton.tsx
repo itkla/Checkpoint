@@ -2,14 +2,19 @@
 
 import { Button } from '@/components/ui/button';
 import { ArrowLeftEndOnRectangleIcon } from '@heroicons/react/24/outline';
+import { LogOut } from 'lucide-react';
+
+export function SignOut() {
+    localStorage.removeItem('token');
+    if (typeof window !== 'undefined') {
+        window.location.href = '/login';
+    }
+    window.location.href = '/login';
+}
 
 export function SignOutButton() {
     const handleSignOut = () => {
-        localStorage.removeItem('token');
-        if (typeof window !== 'undefined') {
-            window.location.href = '/login';
-        }
-        window.location.href = '/login';
+        SignOut();
     };
 
     return (
@@ -18,7 +23,9 @@ export function SignOutButton() {
             className="py-2 px-4"
             onClick={handleSignOut}
         >
-            <ArrowLeftEndOnRectangleIcon />ログアウト
+            <LogOut className="mr-2 h-4 w-4" /> ログアウト
         </Button>
     );
 }
+
+export default {SignOutButton, SignOut};

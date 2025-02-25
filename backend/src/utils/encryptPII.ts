@@ -25,7 +25,6 @@ export function encryptPII(plainText): EncryptedPayload {
 }
 
 export function decryptPII(payload: EncryptedPayload | string): string {
-    // If the payload is a string, parse it into an object
     let data: EncryptedPayload;
     if (typeof payload === 'string') {
         try {

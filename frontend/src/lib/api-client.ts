@@ -1,4 +1,3 @@
-// lib/api-client.ts
 import axios from 'axios';
 // import { cookies } from 'next/headers';
 import type {
@@ -32,7 +31,6 @@ apiClient.interceptors.response.use(
     (response) => response,
     (error) => {
         if (error.response?.status === 401) {
-            // Only force a redirect if we're not already on the login page
             if (window.location.pathname !== '/login') {
                 localStorage.removeItem('token');
                 window.location.href = '/login';
@@ -161,7 +159,6 @@ export const authApi = {
         return response.data;
     },
 
-    // SSO methods
     initiateGoogleLogin: () => {
         window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/api/auth/sso/google`;
     },
@@ -183,10 +180,12 @@ export const authApi = {
 
 export const userApi = {
     getUsers: async (search?: string, page = 1, pageSize = 10) => {
-        const response = await apiClient.get<User[]>('/api/users', {
-            params: { search, page, pageSize },
-        });
-        console.log('Users:', response.data); // Debug log
+        const params = new URLSearchParams();
+        if (search) params.append('q', search);
+        params.append('page', page.toString());
+        params.append('pageSize', pageSize.toString());
+        
+        const response = await apiClient.get(`/api/users?${params.toString()}`);
         return response.data;
     },
 
@@ -244,7 +243,6 @@ export const userApi = {
     }
 };
 
-// Export a unified API object
 export const api = {
     auth: authApi,
     users: userApi,

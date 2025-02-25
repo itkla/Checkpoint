@@ -1,4 +1,3 @@
-// backend/scripts/setup-db.ts
 import { Pool } from 'pg';
 import dotenv from 'dotenv';
 
@@ -9,12 +8,11 @@ const pool = new Pool({
     password: process.env.DB_PASSWORD,
     host: process.env.DB_HOST,
     port: Number(process.env.DB_PORT),
-    database: 'postgres', // Connect to default database first
+    database: 'postgres',
 });
 
 async function setupDatabase() {
     try {
-        // Create database if it doesn't exist
         await pool.query(`
       SELECT 'CREATE DATABASE checkpoint'
       WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'checkpoint')

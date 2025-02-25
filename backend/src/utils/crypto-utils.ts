@@ -37,10 +37,6 @@ export function encryptPrivateKey(plainText: string): EncryptedPayload {
     };
 }
 
-/**
- * Decrypt an object with IV, encrypted content, and auth tag.
- * Returns the original UTF-8 string (private key).
- */
 export function decryptPrivateKey(payload: EncryptedPayload): string {
     if (!PGP_ENCRYPTION_KEY || PGP_ENCRYPTION_KEY.length !== 64) {
         throw new Error('Invalid PGP_KEY_ENCRYPTION_KEY: must be a 64-hex-character string (32 bytes).');

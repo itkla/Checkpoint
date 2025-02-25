@@ -22,7 +22,6 @@ async function getUserPermissions(userId: string): Promise<Set<string>> {
     const allPerms = new Set<string>();
     for (const row of roles_res.rows) {
         const permsArray: string[] = row.permissions?.permissions || row.permissions;
-        // If row.permissions is { permissions: [...] }, adjust accordingly
         permsArray.forEach(p => allPerms.add(p));
     }
 

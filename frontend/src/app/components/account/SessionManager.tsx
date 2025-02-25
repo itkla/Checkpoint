@@ -62,7 +62,6 @@ export function SessionManager({ open, onOpenChange }: {
     const revokeAllSessions = async () => {
         try {
             await api.auth.revokeAllSessions();
-            // Only keep current session in the list
             setSessions(prev => prev.filter(s => s.current));
             toast({
                 title: "成功",

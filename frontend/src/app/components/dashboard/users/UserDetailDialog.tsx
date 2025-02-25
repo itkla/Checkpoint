@@ -7,13 +7,20 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
     CalendarIcon, 
     PhoneIcon,
-    BuildingOfficeIcon,
-    CakeIcon
+    MapPinIcon,
+    CakeIcon,
+    KeyIcon,
+    UserIcon,
+    ShieldCheckIcon,
+    ClockIcon
 } from "@heroicons/react/24/outline";
 import { User } from "@/app/types/user";
+import { format } from "date-fns";
 
 interface UserDetailsDialogProps {
     user: User | null;
@@ -29,135 +36,170 @@ export function UserDetailDialog({
     onEdit
 }: UserDetailsDialogProps) {
     if (!user) return null;
-    console.log(user);
+
+    // Format date if available
+    const formatDate = (dateString?: string) => {
+        if (!dateString) return '未設定';
+        try {
+            return format(new Date(dateString), 'yyyy/MM/dd');
+        } catch (e) {
+            return dateString;
+        }
+    };
+
+    // Format the full address into a single string
+    const formatAddress = () => {
+        const address = user.profile?.address;
+        if (!address) return '未設定';
+        
+        const parts = [
+            address.country,
+            address.state,
+            address.city,
+            address.zip,
+            address.street,
+            address.street2
+        ].filter(Boolean);
+        
+        return parts.length > 0 ? parts.join(', ') : '未設定';
+    };
+
+    const fullName = [user.profile?.first_name, user.profile?.last_name]
+        .filter(Boolean)
+        .join(' ') || user.email?.split('@')[0] || 'ユーザー';
+
+    // Get initials for avatar fallback
+    const getInitials = () => {
+        const first = user.profile?.first_name?.charAt(0) || '';
+        const last = user.profile?.last_name?.charAt(0) || '';
+        return (first + last).toUpperCase() || user.email?.charAt(0).toUpperCase() || 'U';
+    };
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-2xl">
-                <DialogHeader>
+            <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+                <DialogHeader className="pb-2">
                     <div className="flex items-center space-x-4">
-                        <img
-                            src={user.profile?.profile_pic}
-                            alt={user.profile?.first_name}
-                            className="w-16 h-16 rounded-full"
-                        />
+                        <Avatar className="h-16 w-16">
+                            <AvatarImage src={user.profile?.profile_picture} alt={fullName} />
+                            <AvatarFallback className="text-lg font-medium bg-primary/10 text-primary">
+                                {getInitials()}
+                            </AvatarFallback>
+                        </Avatar>
                         <div>
-                            <DialogTitle className="text-2xl font-bold">{user.profile?.first_name}</DialogTitle>
-                            <p className="text-gray-500">{user.email}</p>
-                            <p className="text-xs text-gray-300">{user.id}</p>
+                            <DialogTitle className="text-2xl font-bold">{fullName}</DialogTitle>
+                            <p className="text-sm text-muted-foreground">{user.email}</p>
+                            <Badge variant={user.role === "admin" ? "default" : "outline"} className="mt-1">
+                                {user.role || 'ユーザー'}
+                            </Badge>
                         </div>
                     </div>
                 </DialogHeader>
 
-                <div className="py-4">
-                    <div className="grid grid-cols-2 gap-6">
-                        {/* Left column */}
-                        <div className="space-y-4">
-                            <h3 className="font-semibold text-gray-900 border-b pb-2">基本情報</h3>
+                <Separator className="my-2" />
 
-                            <div className="space-y-2">
-                                <div className="flex items-center text-gray-600">
-                                    <CakeIcon className="w-5 h-5 mr-2" />
-                                    <span>誕生日: {user.profile?.dateOfBirth || '未設定'}</span>
-                                </div>
-                                <div className="flex items-center text-gray-600">
-                                    <PhoneIcon className="w-5 h-5 mr-2" />
-                                    <span>電話: {user.profile?.phone || '未設定'}</span>
-                                </div>
-                                <div className="flex items-center text-gray-600">
-                                    <CalendarIcon className="w-5 h-5 mr-2" />
-                                    <span>登録日: {user.created_at || '不明'}</span>
+                <div className="space-y-6 py-2">
+                    {/* Personal Info Section */}
+                    <div>
+                        <h3 className="font-semibold text-sm text-muted-foreground mb-3 flex items-center">
+                            <UserIcon className="w-4 h-4 mr-2" />
+                            個人情報
+                        </h3>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="flex items-center space-x-3">
+                                <CakeIcon className="w-4 h-4 text-muted-foreground" />
+                                <div>
+                                    <p className="text-xs text-muted-foreground">誕生日</p>
+                                    <p className="text-sm">{formatDate(user.profile?.dateOfBirth)}</p>
                                 </div>
                             </div>
-
-                            <h3 className="font-semibold text-gray-900 border-b pb-2">住所</h3>
-
-                            <div className="space-y-2">
-                                <div className="flex items-center text-gray-600">
-                                    {/* <BuildingOfficeIcon className="w-5 h-5 mr-2" /> */}
-                                    <span>{user.profile?.address?.country || '未設定'}</span>
-                                </div>
-                                <div className="flex items-center text-gray-600">
-                                    {/* <PhoneIcon className="w-5 h-5 mr-2" /> */}
-                                    <span>{user.profile?.address?.zip || '未設定'}</span>
-                                </div>
-                                <div className="flex items-center text-gray-600">
-                                    <span>{user.profile?.address?.state || '不明'}</span>
-                                </div>
-                                <div className="flex items-center text-gray-600">
-                                    <span>{user.profile?.address?.city || '不明'}</span>
-                                </div>
-                                <div className="flex items-center text-gray-600">
-                                    <span>{user.profile?.address?.street || '不明'}</span>
-                                </div>
-                                <div className="flex items-center text-gray-600">
-                                    <span>{user.profile?.address?.street2 || '不明'}</span>
+                            
+                            <div className="flex items-center space-x-3">
+                                <PhoneIcon className="w-4 h-4 text-muted-foreground" />
+                                <div>
+                                    <p className="text-xs text-muted-foreground">電話番号</p>
+                                    <p className="text-sm">{user.profile?.phone || '未設定'}</p>
                                 </div>
                             </div>
-
-                            {/* <div className="pt-4">
-                                <h4 className="font-medium text-gray-900 mb-2">ステータス</h4>
-                                <Badge
-                                    variant={user.active ? "default" : "destructive"}
-                                    className="text-xs"
-                                >
-                                    {user.active ? 'アクティブ' : '非アクティブ'}
-                                </Badge>
-                            </div> */}
+                            
+                            <div className="flex space-x-3 col-span-2">
+                                <MapPinIcon className="w-4 h-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+                                <div>
+                                    <p className="text-xs text-muted-foreground mb-1">住所</p>
+                                    {user.profile?.address ? (
+                                        <div className="text-sm space-y-0.5">
+                                            {user.profile.address.street && <p>{user.profile.address.street}</p>}
+                                            {user.profile.address.street2 && <p>{user.profile.address.street2}</p>}
+                                            <p>
+                                                {[
+                                                    user.profile.address.city,
+                                                    user.profile.address.state,
+                                                    user.profile.address.zip
+                                                ].filter(Boolean).join(', ')}
+                                            </p>
+                                            {user.profile.address.country && <p>{user.profile.address.country}</p>}
+                                        </div>
+                                    ) : (
+                                        <p className="text-sm">未設定</p>
+                                    )}
+                                </div>
+                            </div>
+                            
+                            <div className="flex items-center space-x-3">
+                                <ClockIcon className="w-4 h-4 text-muted-foreground" />
+                                <div>
+                                    <p className="text-xs text-muted-foreground">登録日</p>
+                                    <p className="text-sm">{formatDate(user.created_at)}</p>
+                                </div>
+                            </div>
                         </div>
+                    </div>
 
-                        {/* Right column */}
-                        <div className="space-y-4">
-                            <h3 className="font-semibold text-gray-900 border-b pb-2">アクセス権限</h3>
+                    <Separator />
 
-                            <div>
-                                <div className="mb-2">
-                                    <span className="font-medium">役割:</span>{' '}
-                                    <Badge variant="outline" className="ml-2">
-                                        {user.role}
+                    {/* Security Section */}
+                    <div>
+                        <h3 className="font-semibold text-sm text-muted-foreground mb-3 flex items-center">
+                            <ShieldCheckIcon className="w-4 h-4 mr-2" />
+                            セキュリティ情報
+                        </h3>
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="flex items-center space-x-3">
+                                <KeyIcon className="w-4 h-4 text-muted-foreground" />
+                                <div>
+                                    <p className="text-xs text-muted-foreground">2FA認証</p>
+                                    <Badge 
+                                        variant="outline" 
+                                        className={user.two_factor_enabled ? "bg-green-50 text-green-600 border-green-200" : "bg-red-50 text-red-600 border-red-200"}
+                                    >
+                                        {user.two_factor_enabled ? '有効' : '無効'}
                                     </Badge>
                                 </div>
-
-                                <div className="space-y-2">
-                                    <h4 className="text-sm font-medium text-gray-900">権限:</h4>
-                                    <div className="flex flex-wrap gap-2">
-                                        {user.permissions?.map((permission) => (
+                            </div>
+                            
+                            {user.permissions && user.permissions.length > 0 && (
+                                <div className="col-span-2">
+                                    <p className="text-xs text-muted-foreground mb-1">権限</p>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {user.permissions.map((permission) => (
                                             <Badge
                                                 key={permission}
                                                 variant="secondary"
-                                                className="text-xs"
+                                                className="text-xs font-normal"
                                             >
                                                 {permission}
                                             </Badge>
                                         ))}
                                     </div>
                                 </div>
-                            </div>
-                            
-                            <h3 className="font-semibold text-gray-900 border-b pb-2">セキュリティ</h3>
-                            <div className="">
-                                {/* <h4 className="font-medium text-gray-900 mb-2">セキュリティ</h4>
-                                <span className="text-gray-600">{user.last_login || '記録なし'}</span> */}
-                                {/* <span className="font-medium text-gray-900">2FA </span> */}
-                                <span className="text-gray-900">2FA: 
-                                    <Badge
-                                        variant="outline"
-                                        className={`ml-2 ${
-                                            user.two_factor_enabled
-                                                ? "text-green-500 border-green-500"
-                                                : "text-red-500 border-red-500"
-                                        }`}
-                                    >
-                                        {user.two_factor_enabled ? '有効' : '無効'}
-                                    </Badge>
-                                </span>
-                                {/* <span className="text-gray-900">Password last changed: {user.password_changed_at || '記録なし'}</span> */}
-                            </div>
+                            )}
                         </div>
                     </div>
                 </div>
 
-                <DialogFooter className="flex justify-between">
+                <DialogFooter className="sm:justify-between gap-2">
                     <Button variant="outline" onClick={() => onOpenChange(false)}>
                         閉じる
                     </Button>

@@ -26,7 +26,8 @@ CREATE TABLE users (
     dateOfBirth TEXT,
     phone_number VARCHAR(9999),
     address VARCHAR(9999),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    two_factor_enabled BOOLEAN DEFAULT FALSE
 );
 
 -- Create auth_methods table

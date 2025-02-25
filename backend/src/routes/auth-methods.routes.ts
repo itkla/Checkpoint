@@ -32,8 +32,7 @@ export const authMethodsRoutes: FastifyPluginAsync = async (server, opts): Promi
             }
         },
     });
-    
-    // DELETE AN AUTH METHOD
+
     server.delete('/:authMethodId', {
         onRequest: [server.authenticate],
         handler: async (request, reply) => {

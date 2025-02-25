@@ -1,4 +1,3 @@
-// lib/passwordValidation.ts
 export function validatePassword(password: string) {
     return {
         isLongEnough: password.length >= 8,

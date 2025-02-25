@@ -1,13 +1,9 @@
-// layout.tsx (or DashboardLayout.tsx)
 import { ReactNode } from 'react'
 import Navbar from '@/app/components/dashboard/DashboardNavbar'
 import DashboardSidebar from '@/app/components/dashboard/DashboardSidebar'
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import {AppSidebar} from '@/app/components/dashboard/app-sidebar';
 import { cookies } from 'next/headers';
-
-// get logged-in user and make available to all components
-// import { useUser } from '@/hooks/useUser'
 
 export default async function DashboardLayout({ children }: { children: ReactNode }) {
     const token = (await cookies()).get('checkpoint_jwt')?.value || '';

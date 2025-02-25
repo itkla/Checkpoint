@@ -21,7 +21,7 @@ import { useToast } from '@/hooks/use-toast';
 import { api } from '@/lib/api-client';
 import { userProfileSchema } from '@/app/types/auth';
 import type { User } from '@/app/types/user';
-import { LuPencil } from 'react-icons/lu'
+import { Pencil } from 'lucide-react';
 
 interface EditProfileDialogProps {
     user: User;
@@ -38,12 +38,8 @@ export function EditProfileDialog({
 }: EditProfileDialogProps) {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const { toast } = useToast();
-
-    // Create a custom resolver that transforms field names before validation
     const customResolver = async (data: any, context: any, options: any) => {
-        // Transform data from camelCase to snake_case for validation
         const transformedData = {
-            // Map firstName to first_name, lastName to last_name
             first_name: data.firstName,
             last_name: data.lastName,
             department: data.department,
@@ -52,7 +48,6 @@ export function EditProfileDialog({
             address: data.address,
         };
 
-        // Use Zod resolver with transformed data
         return zodResolver(userProfileSchema)(transformedData, context, options);
     };
 
@@ -64,6 +59,9 @@ export function EditProfileDialog({
             department: user.department || '',
             phone: user.profile?.phone || '',
             email: user.email,
+            birthday: user.profile?.dateOfBirth 
+                ? new Date(user.profile.dateOfBirth).toISOString().split('T')[0] 
+                : '',
             address: {
                 street: user.profile?.address?.street || '',
                 street2: user.profile?.address?.street2 || '',
@@ -83,6 +81,9 @@ export function EditProfileDialog({
                 department: user.department || '',
                 phone: user.profile?.phone || '',
                 email: user.email,
+                birthday: user.profile?.dateOfBirth 
+                    ? new Date(user.profile.dateOfBirth).toISOString().split('T')[0]
+                    : '',
                 address: {
                     street: user.profile?.address?.street || '',
                     street2: user.profile?.address?.street2 || '',
@@ -97,29 +98,27 @@ export function EditProfileDialog({
 
     const onSubmit = async (data: any) => {
         setIsSubmitting(true);
-        console.log(`Got data to submit:`, data);
+        // console.log(`Got data to submit:`, data);
 
         try {
-            // Format data to match exactly what the backend expects
+            const addressObject = {
+                street: data.address.street || user.profile?.address?.street || '',
+                street2: data.address.street2 || user.profile?.address?.street2 || '',
+                city: data.address.city || user.profile?.address?.city || '',
+                state: data.address.state || user.profile?.address?.state || '',
+                zip: data.address.zip || user.profile?.address?.zip || '',
+                country: data.address.country || user.profile?.address?.country || '',
+            };
             const updateData = {
-                ...user,
-                email: data.email,
+                id: user.id,
+                email: data.email || user.email,
                 profile: {
-                    first_name: data.firstName,
-                    last_name: data.lastName,
-                    phone: data.phone,
-                    // Make sure to include these fields to match UserSchema
+                    first_name: data.firstName || user.profile?.first_name || '',
+                    last_name: data.lastName || user.profile?.last_name || '',
+                    phone: data.phone || user.profile?.phone || '',
                     profile_picture: user.profile?.profile_pic || '',
-                    dateOfBirth: user.profile?.dateOfBirth || undefined,
-                    // Format address as a proper object
-                    address: {
-                        street: data.address.street,
-                        street2: data.address.street2,
-                        city: data.address.city,
-                        state: data.address.state,
-                        zip: data.address.zip,
-                        country: data.address.country,
-                    },
+                    dateOfBirth: data.birthday ? new Date(data.birthday) : user.profile?.dateOfBirth,
+                    address: addressObject,
                 },
             };
 
@@ -150,7 +149,7 @@ export function EditProfileDialog({
             <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                     <DialogTitle className="flex flex-row items-center">
-                        <LuPencil className="h-6 w-6 mr-2" /> プロフィールの編集
+                        <Pencil className="h-6 w-6 mr-2" /> 情報編集
                     </DialogTitle>
                 </DialogHeader>
 
@@ -200,19 +199,35 @@ export function EditProfileDialog({
                             )}
                         />
 
-                        <FormField
-                            control={form.control}
-                            name="phone"
-                            render={({ field }) => (
-                                <FormItem>
-                                    <FormLabel>電話番号</FormLabel>
-                                    <FormControl>
-                                        <Input {...field} type="tel" />
-                                    </FormControl>
-                                    <FormMessage />
-                                </FormItem>
-                            )}
-                        />
+                        <div className="grid grid-cols-2 gap-4">
+                            <FormField
+                                control={form.control}
+                                name="phone"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>電話番号</FormLabel>
+                                        <FormControl>
+                                            <Input {...field} type="tel" />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            <FormField
+                                control={form.control}
+                                name="birthday"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel>生年月日</FormLabel>
+                                        <FormControl>
+                                            <Input {...field} type="date" />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
 
                         <fieldset className="border p-4 rounded">
                             <legend className="mb-2 text-sm font-medium">住所</legend>

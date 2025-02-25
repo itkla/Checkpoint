@@ -12,7 +12,6 @@ export async function registerPasskey(name: string) {
     try {
         console.log('Starting passkey registration...');
 
-        // Get registration options from server
         const optionsResponse = await fetch(backendApiUrl + '/api/auth/passkey/register/start', {
             method: 'POST',
             headers: {
@@ -33,13 +32,9 @@ export async function registerPasskey(name: string) {
 
         const options: PublicKeyCredentialCreationOptionsJSON = responseData;
         console.log('Got registration options:', options);
-
-        // Create credentials using WebAuthn
         console.log('Starting WebAuthn registration with options:', responseData);
         const credential = await startRegistration(responseData);
         console.log('Created credential:', credential);
-
-        // Send credential to server for verification
         const verificationResponse = await fetch(backendApiUrl + '/api/auth/passkey/register/complete', {
             method: 'POST',
             headers: {
@@ -71,8 +66,6 @@ export async function registerPasskey(name: string) {
 export async function loginWithPasskey(email: string) {
     try {
         console.log('Starting passkey authentication...');
-
-        // Get authentication options from server
         const optionsResponse = await fetch(backendApiUrl + '/api/auth/passkey/login/start', {
             method: 'POST',
             headers: {
@@ -87,13 +80,9 @@ export async function loginWithPasskey(email: string) {
         if (!optionsResponse.ok) {
             throw new Error(responseData.error || 'Failed to start authentication');
         }
-
-        // Start the authentication process
         console.log('Starting WebAuthn authentication with options:', responseData);
         const credential = await startAuthentication(responseData);
         console.log('Authentication credential:', credential);
-
-        // Send credential to server for verification
         const verificationResponse = await fetch(backendApiUrl + '/api/auth/passkey/login/complete', {
             method: 'POST',
             headers: {
@@ -118,8 +107,6 @@ export async function loginWithPasskey(email: string) {
         throw new Error(error.message || 'Failed to authenticate with passkey');
     }
 }
-
-// Add credential export/import functions
 export async function exportCredential(credentialId: string) {
     const credential = await navigator.credentials.get({
         publicKey: {

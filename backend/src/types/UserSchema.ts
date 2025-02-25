@@ -14,7 +14,14 @@ const UserSchema = z.object({
             country: z.string().optional(),
         }).optional(),
         department: z.string().optional(),
-        dateOfBirth: z.date().optional(),
+        dateOfBirth: z.union([
+            z.date(),
+            z.string()
+              .refine(str => !isNaN(Date.parse(str)), {
+                message: "Invalid date string"
+              })
+              .transform(str => new Date(str))
+          ]).optional(),
         first_name: z.string().optional(),
         last_name: z.string().optional(),
         profile_pic: z.string().optional(),

@@ -50,16 +50,33 @@ export function LoginForm() {
 
     const handleMFA = async (code: string) => {
         try {
+            console.log('Submitting MFA code:', code);
             const verification = await api.auth.verify2FALogin({ tempToken: tempToken ?? '', code });
-            if (verification.success && verification.token) {
-                localStorage.setItem('token', verification.token);
+            console.log('MFA verification response:', verification);
+            if (verification.finalToken) {
+                localStorage.setItem('token', verification.finalToken);
+                setShowMFADialog(false);
+                setIsMFARequired(false);
+                setTempToken(null);
+                
+                toast({
+                    title: '認証成功',
+                    description: 'ログインに成功しました',
+                });
                 if (next) {
                     router.push(next);
                 } else {
-                    router.push('/dashboard');
+                    router.push('/me');
                 }
+            } else {
+                toast({
+                    title: '認証エラー',
+                    description: 'トークンが見つかりませんでした',
+                    variant: 'destructive',
+                });
             }
         } catch (error: any) {
+            console.error('MFA verification error:', error);
             toast({
                 title: '2FAエラー',
                 description: error.message || '2段階認証に失敗しました',

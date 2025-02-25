@@ -16,15 +16,11 @@ export const Dialog: React.FC<DialogProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto">
-      {/* Backdrop */}
       <div 
         className="fixed inset-0 bg-black bg-opacity-25 transition-opacity" 
         onClick={() => onOpenChange(false)}
       />
-      
-      {/* Dialog positioning */}
       <div className="fixed inset-0 flex items-center justify-center p-4">
-        {/* Dialog content */}
         <div 
           className="relative w-full max-w-md transform overflow-hidden rounded-lg bg-white p-6 text-left shadow-xl transition-all"
           onClick={(e) => e.stopPropagation()}

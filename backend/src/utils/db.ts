@@ -3,7 +3,6 @@ import { createClient } from 'redis';
 import fs from 'fs';
 import path from 'path';
 
-// Load environment variables from .env file
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -26,13 +25,11 @@ redis.connect()
 async function initDB() {
     const client = await pool.connect();
     try {
-        // Get all migration files from the migrations directory
         const migrationsPath = path.join(__dirname, '../../migrations');
         const migrationFiles = fs.readdirSync(migrationsPath)
             .filter(file => file.endsWith('.sql'))
             .sort(); // Ensures migrations run in order
 
-        // Get already executed migrations
         await client.query(`
             CREATE TABLE IF NOT EXISTS migrations (
             id SERIAL PRIMARY KEY,
@@ -46,7 +43,6 @@ async function initDB() {
         );
         const executedFiles = new Set(executedMigrations.rows.map(row => row.filename));
 
-        // Execute new migrations
         for (const file of migrationFiles) {
             if (!executedFiles.has(file)) {
                 console.log(`Executing migration: ${file}`);

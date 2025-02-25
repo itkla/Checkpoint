@@ -1,4 +1,3 @@
-// DashboardSidebar.tsx
 "use client"
 
 import Link from 'next/link'
@@ -9,9 +8,6 @@ import {
     Cog6ToothIcon,
     CreditCardIcon,
 } from '@heroicons/react/24/outline'
-
-// Import the shadcn/ui Sidebar components.
-// Adjust the path as needed if you placed them in a different directory.
 import {
     Sidebar,
     SidebarContent,
@@ -23,7 +19,6 @@ import {
     SidebarMenuItem,
 } from '@/components/ui/sidebar'
 
-// Example nav items
 const menuItems = [
     { href: '/dashboard', icon: Squares2X2Icon, label: 'ホーム' },
     { href: '/dashboard/users', icon: UserIcon, label: 'ユーザー' },
@@ -35,8 +30,6 @@ export default function DashboardSidebar() {
     const pathname = usePathname()
 
     return (
-        // We can hide on small screens (md:hidden) if you need a separate mobile approach,
-        // or just always display. Tailwind classes are flexible here.
         <Sidebar>
             <SidebarContent>
                 <SidebarGroup>
