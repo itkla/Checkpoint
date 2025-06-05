@@ -272,10 +272,10 @@ export const authRoutes: FastifyPluginAsync = async (server, opts) => {
             const hashedPassword = await argon2.hash(newPassword);
             await pool.query(
                 `UPDATE auth_methods
-                SET hashed_password = $1
+                SET metadata = $1::jsonb
               WHERE user_id = $2
                 AND type = 'password'`,
-                [hashedPassword, userId]
+                [JSON.stringify(hashedPassword), userId]
             );
             await pool.query(`DELETE FROM password_resets WHERE token = $1`, [token]);
 
