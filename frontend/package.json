@@ -43,7 +43,7 @@
     "@shadcn/ui": "^0.0.4",
     "@simplewebauthn/browser": "^13.1.0",
     "@tanstack/react-query": "^5.66.0",
-    "axios": "^1.7.9",
+    "axios": "^1.13.5",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.0.0",
